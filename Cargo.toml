@@ -1,0 +1,11 @@
+[package]
+name = "faerie"
+version = "0.0.0"
+authors = ["m4b <m4b.github.io@gmail.com>"]
+readme = "README.md"
+keywords = ["sidhe", "faerie", "binary"]
+repository = "https://github.com/m4b/faerie"
+license = "MIT"
+description = "A supernatural crate courtesy of the Fair Folk"
+
+[dependencies]
