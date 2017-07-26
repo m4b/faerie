@@ -1,29 +1,24 @@
-/// One of the Fair Folk, the People of the Mounds, the sídhe, the aos sí, or any other fine name --- be very careful.
-pub struct Faerie<'a> {
-    _magic: &'a [u8]
-}
+extern crate goblin;
+extern crate scroll;
+extern crate shawshank;
+extern crate ordermap;
 
-impl<'a> Faerie<'a> {
+pub use goblin::container::{self, Ctx};
+pub use goblin::error as error;
 
-    /// Be careful what you wish for
-    pub fn summon (magic: &[u8]) -> Faerie {
-        Faerie { _magic: magic }
-    }
+pub type Code = Vec<u8>;
+pub type Data = Vec<u8>;
 
-    pub fn is_magical(&self) -> bool {
-        true
-    }
-}
+mod target;
+pub use target::Target;
+
+pub mod elf;
+pub use elf::Elf;
+
+pub mod artifact;
+pub use artifact::Artifact;
 
 #[cfg(test)]
 mod tests {
 
-    use super::Faerie;
-
-    #[test]
-    fn is_magical() {
-        let magic = [0; 16];
-        let faerie = Faerie::summon(&magic);
-        assert!(faerie.is_magical());
-    }
 }

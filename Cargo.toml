@@ -1,11 +1,19 @@
 [package]
 name = "faerie"
-version = "0.0.0"
+version = "0.0.1"
 authors = ["m4b <m4b.github.io@gmail.com>"]
 readme = "README.md"
-keywords = ["sidhe", "faerie", "binary"]
+keywords = ["sidhe", "binary", "object", "compiler", "emit"]
 repository = "https://github.com/m4b/faerie"
 license = "MIT"
-description = "A supernatural crate courtesy of the Fair Folk"
+description = "Prototype native binary object file emitter"
+
+[[bin]]
+name = "prototype"
+path = "src/bin/main.rs"
 
 [dependencies]
+goblin = { git = "https://github.com/m4b/goblin" }
+scroll = { git = "https://github.com/m4b/scroll" }
+shawshank = "0.2.3"
+ordermap = "0.2.10"
