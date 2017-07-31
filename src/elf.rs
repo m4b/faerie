@@ -1,9 +1,9 @@
 use goblin;
-use {error, Artifact, Target, Code, Data};
+use {error, Artifact, Object, Target, Code, Data};
 
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{Seek, BufWriter, Write};
+use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
 use scroll::Lwrite;
 use shawshank;
@@ -346,7 +346,7 @@ impl Elf {
         let (idx, offset) = self.new_string(name);
         // store the size of this code
         let size = code.len();
-        println!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // build symbol based on this 
         let mut symbol = SymbolBuilder::new(SymbolType::Function).size(size).name_offset(offset).global().create();
         // the symbols section reference/index will be the current number of sections
@@ -376,7 +376,7 @@ impl Elf {
 
         // we add +4 because using -4 addend for all PC32 relocs for now because ihavenoideawhatimdoing
         let size = data.len();
-        println!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // TODO: extract this into a local function, DRY and shit
         let mut symbol = SymbolBuilder::new(SymbolType::Elf).size(size).name_offset(offset).global().create();
         symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
@@ -423,16 +423,16 @@ impl Elf {
         self.add_reloc(to, reloc, idx)
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize) {
-        println!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
+        debug!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
         let reloc_size = Relocation::size(reloc.is_rela, self.ctx) as u64;
         if self.relocations.contains_key(&idx) {
-            println!("{} has relocs", relocee);
+            debug!("{} has relocs", relocee);
             let &mut (ref mut section, ref mut relocs) = self.relocations.get_mut(&idx).unwrap();
             // its size is currently how many relocations there are
             section.sh_size += section.sh_entsize;
             relocs.push(reloc);
         } else {
-            println!("{} does NOT have relocs", relocee);
+            debug!("{} does NOT have relocs", relocee);
             // now create the relocation section
             let (_reloc_idx, reloc_section_offset) = self.new_string(format!(".reloc.{}", relocee));
             let mut reloc_section = SectionBuilder::new(reloc_size).name_offset(reloc_section_offset).section_type(SectionType::Relocation).create(&self.ctx);
@@ -444,9 +444,8 @@ impl Elf {
             self.nsections += 1;
         }
     }
-    pub fn write<T: Write + Seek + ::std::fmt::Debug>(mut self, file: T) -> goblin::error::Result<()> {
+    pub fn write<T: Write + Seek>(mut self, file: T) -> goblin::error::Result<()> {
         let mut file = BufWriter::new(file);
-        println!("File: {:?}", file);
         /////////////////////////////////////
         // Compute Offsets
         /////////////////////////////////////
@@ -457,7 +456,7 @@ impl Elf {
         let reloc_offset = symtab_offset + sizeof_symtab as u64;
         let sh_offset = reloc_offset + sizeof_relocs as u64;
 
-        println!("strtab: {:#x} symtab {:#x} relocs {:#x} sh_offset {:#x}", strtab_offset, symtab_offset, reloc_offset, sh_offset);
+        debug!("strtab: {:#x} symtab {:#x} relocs {:#x} sh_offset {:#x}", strtab_offset, symtab_offset, reloc_offset, sh_offset);
 
         /////////////////////////////////////
         // Header
@@ -472,7 +471,7 @@ impl Elf {
         
         file.lwrite_with(header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
-        println!("after_header {:#x}, expect: {:#x} - {}", after_header, Header::size(&self.ctx), after_header == Header::size(&self.ctx) as u64);
+        debug!("after_header {:#x}, expect: {:#x} - {}", after_header, Header::size(&self.ctx), after_header == Header::size(&self.ctx) as u64);
 
         /////////////////////////////////////
         // Code
@@ -482,7 +481,7 @@ impl Elf {
             file.write(function.as_slice())?;
         }
         let after_code = file.seek(Current(0))?;
-        println!("after_code {:#x}, expect: {:#x} - {}", after_code, strtab_offset, after_code == strtab_offset);
+        debug!("after_code {:#x}, expect: {:#x} - {}", after_code, strtab_offset, after_code == strtab_offset);
 
         /////////////////////////////////////
         // Data
@@ -492,7 +491,7 @@ impl Elf {
             file.write(data.as_slice())?;
         }
         let after_data = file.seek(Current(0))?;
-        println!("after_data {:#x}, expect: {:#x} - {}", after_data, strtab_offset, after_data == strtab_offset);
+        debug!("after_data {:#x}, expect: {:#x} - {}", after_data, strtab_offset, after_data == strtab_offset);
 
         /////////////////////////////////////
         // Init sections
@@ -525,27 +524,27 @@ impl Elf {
             let offset = self.offsets.get(&i).unwrap();
             (*offset, symbol)
         }).collect::<Vec<(usize, String)>>();
-        println!("symbol {:?}", strtab);
+        debug!("symbol {:?}", strtab);
 
         file.seek(Start(strtab_offset))?;
         file.lwrite(0u8)?; // for the null value in the strtab;
         for (_offset, string) in strtab {
-            println!("String: {:?}", string);
+            debug!("String: {:?}", string);
             file.write(string.as_str().as_bytes())?;
             file.lwrite(0u8)?;
         }
         let after_strtab = file.seek(Current(0))?;
-        println!("after_strtab {:#x}, expect: {:#x} - {}", after_strtab, symtab_offset, after_strtab == symtab_offset);
+        debug!("after_strtab {:#x}, expect: {:#x} - {}", after_strtab, symtab_offset, after_strtab == symtab_offset);
 
         /////////////////////////////////////
         // Symtab
         /////////////////////////////////////
         for (_id, symbol) in self.section_symbols.into_iter() {
-            println!("Section Symbol: {:?}", symbol);
+            debug!("Section Symbol: {:?}", symbol);
             file.lwrite_with(symbol, self.ctx)?;
         }
         for (id, symbol) in self.symbols.into_iter() {
-            println!("Symbol: {:?}", symbol);
+            debug!("Symbol: {:?}", symbol);
             file.lwrite_with(symbol, self.ctx)?;
             match self.sections.get(&id) {
                 Some(section) => {
@@ -555,7 +554,7 @@ impl Elf {
             }
         }
         let after_symtab = file.seek(Current(0))?;
-        println!("after_symtab {:#x}, expect: {:#x} - {} - shdr_size {}", after_symtab, sh_offset, after_symtab == sh_offset, Section::size(&self.ctx) as u64);
+        debug!("after_symtab {:#x}, expect: {:#x} - {} - shdr_size {}", after_symtab, sh_offset, after_symtab == sh_offset, Section::size(&self.ctx) as u64);
 
         /////////////////////////////////////
         // Relocations
@@ -566,7 +565,7 @@ impl Elf {
             roffset += section.sh_size;
             section_headers.push(section);
             for relocation in relocations.drain(..) {
-                println!("Relocation: {:?}", relocation);
+                debug!("Relocation: {:?}", relocation);
                 file.lwrite_with(relocation, (relocation.is_rela, self.ctx))?;
             }
         }
@@ -576,38 +575,39 @@ impl Elf {
         /////////////////////////////////////
         let shdr_size = section_headers.len() as u64 * Section::size(&self.ctx) as u64;
         for shdr in section_headers {
-            println!("Section: {:?}", shdr);
+            debug!("Section: {:?}", shdr);
             file.lwrite_with(shdr, self.ctx)?;
         }
 
         let after_shdrs = file.seek(Current(0))?;
         let expected = sh_offset + shdr_size;
-        println!("after_shdrs {:#x}, expect: {:#x} - {}", after_shdrs, expected, after_shdrs == expected);
-        println!("done");
+        debug!("after_shdrs {:#x}, expect: {:#x} - {}", after_shdrs, expected, after_shdrs == expected);
+        debug!("done");
         Ok(())
     }
 }
 
-impl Artifact for Elf {
-    fn new(target: Target, name: Option<String>) -> Self {
-        Elf::new(name, target)
-    }
-    fn add_code(&mut self, name: String, code: Code) {
-        self.add_code(name, code)
-    }
-    fn add_data(&mut self, name: String, data: Data) {
-        self.add_data(name, data)
-    }
-    fn import(&mut self, import: String) {
-        self.import(import)
-    }
-    fn link_import(&mut self, caller: &str, import: &str, offset: usize) {
-        self.link_import(caller, import, offset)
-    }
-    fn link(&mut self, referrer: &str, referree: &str, offset: usize) {
-        self.link(referrer, referree, offset)
-    }
-    fn write<T: Write + Seek + ::std::fmt::Debug>(self, file: T) -> error::Result<()> {
-        self.write(file)
+impl Object for Elf {
+    fn to_bytes(artifact: &Artifact) -> error::Result<Vec<u8>> {
+        let mut elf = Elf::new(Some(artifact.name.to_owned()), artifact.target.clone());
+        for &(ref name, ref code) in &artifact.code {
+            // todo just make this a reference, since we need to copy into the vector of bytes anyway
+            elf.add_code(name.to_string(), code.clone());
+        }
+        for &(ref name, ref data) in &artifact.data {
+            elf.add_data(name.to_string(), data.clone());
+        }
+        for &(ref referrer, ref referree, ref offset) in &artifact.links {
+            elf.link(referrer, referree, *offset);
+        }
+        for import in &artifact.imports {
+            elf.import(import.to_string());
+        }
+        for &(ref caller, ref import, ref offset) in &artifact.import_links {
+            elf.link_import(caller, import, *offset);
+        }
+        let mut buffer = Cursor::new(Vec::new());
+        elf.write(&mut buffer)?;
+        Ok(buffer.into_inner())
     }
 }
