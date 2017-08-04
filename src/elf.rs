@@ -74,6 +74,7 @@ impl SymbolBuilder {
     }
     pub fn create(self) -> Symbol {
         use goblin::elf::sym::{STT_NOTYPE, STT_FILE, STT_FUNC, STT_SECTION, STT_OBJECT, STB_LOCAL, STB_GLOBAL};
+        use goblin::elf::section_header::SHN_ABS;
         let mut st_shndx = 0;
         let mut st_info = 0;
         let st_value = 0;
@@ -95,7 +96,7 @@ impl SymbolBuilder {
             SymbolType::File => {
                 st_info = STT_FILE;
                 // knowledge™
-                st_shndx = 0xfff1;
+                st_shndx = SHN_ABS as usize;
             },
             SymbolType::None => {
                 st_info = STT_NOTYPE
