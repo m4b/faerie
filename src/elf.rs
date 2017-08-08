@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
-use scroll::Lwrite;
+use scroll::IOwrite;
 use shawshank;
 use ordermap::OrderMap;
 
@@ -470,7 +470,7 @@ impl Elf {
         header.e_shnum = self.nsections;
         header.e_shstrndx = STRTAB_LINK;
         
-        file.lwrite_with(header, self.ctx)?;
+        file.iowrite_with(header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
         debug!("after_header {:#x}, expect: {:#x} - {}", after_header, Header::size(&self.ctx), after_header == Header::size(&self.ctx) as u64);
 
@@ -528,11 +528,11 @@ impl Elf {
         debug!("symbol {:?}", strtab);
 
         file.seek(Start(strtab_offset))?;
-        file.lwrite(0u8)?; // for the null value in the strtab;
+        file.iowrite(0u8)?; // for the null value in the strtab;
         for (_offset, string) in strtab {
             debug!("String: {:?}", string);
             file.write(string.as_str().as_bytes())?;
-            file.lwrite(0u8)?;
+            file.iowrite(0u8)?;
         }
         let after_strtab = file.seek(Current(0))?;
         debug!("after_strtab {:#x}, expect: {:#x} - {}", after_strtab, symtab_offset, after_strtab == symtab_offset);
@@ -542,11 +542,11 @@ impl Elf {
         /////////////////////////////////////
         for (_id, symbol) in self.section_symbols.into_iter() {
             debug!("Section Symbol: {:?}", symbol);
-            file.lwrite_with(symbol, self.ctx)?;
+            file.iowrite_with(symbol, self.ctx)?;
         }
         for (id, symbol) in self.symbols.into_iter() {
             debug!("Symbol: {:?}", symbol);
-            file.lwrite_with(symbol, self.ctx)?;
+            file.iowrite_with(symbol, self.ctx)?;
             match self.sections.get(&id) {
                 Some(section) => {
                     section_headers.push(section.clone());
@@ -567,7 +567,7 @@ impl Elf {
             section_headers.push(section);
             for relocation in relocations.drain(..) {
                 debug!("Relocation: {:?}", relocation);
-                file.lwrite_with(relocation, (relocation.is_rela, self.ctx))?;
+                file.iowrite_with(relocation, (relocation.is_rela, self.ctx))?;
             }
         }
 
@@ -577,7 +577,7 @@ impl Elf {
         let shdr_size = section_headers.len() as u64 * Section::size(&self.ctx) as u64;
         for shdr in section_headers {
             debug!("Section: {:?}", shdr);
-            file.lwrite_with(shdr, self.ctx)?;
+            file.iowrite_with(shdr, self.ctx)?;
         }
 
         let after_shdrs = file.seek(Current(0))?;
