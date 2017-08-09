@@ -14,7 +14,7 @@ path = "src/bin/main.rs"
 
 [dependencies]
 goblin = { git = "https://github.com/m4b/goblin" }
-scroll = { git = "https://github.com/m4b/scroll" }
+scroll = "0.7"
 log = "0.3.8"
 env_logger = "0.4.3"
 shawshank = "0.2.3"
