@@ -49,18 +49,18 @@ impl<'a> Mach<'a> {
             data,
         }
     }
-    fn header(ctx: &Ctx, target: Target) -> Header {
-        let mut header = Header::new(&ctx);
+    fn header(&self) -> Header {
+        let mut header = Header::new(&self.ctx);
         header.filetype = MH_OBJECT;
         // safe to divide up the sections into sub-sections via symbols for dead code stripping
         header.flags = MH_SUBSECTIONS_VIA_SYMBOLS;
-        header.cputype = CpuType::from(target).0;
+        header.cputype = CpuType::from(self.target).0;
         header.cpusubtype = 3;
         header
     }
     pub fn write<T: Write + Seek>(self, file: T) -> error::Result<()> {
         let mut file = BufWriter::new(file);
-        let header = Self::header(&self.ctx, self.target);
+        let header = self.header();
         file.iowrite_with(header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
         Ok(())
@@ -69,7 +69,7 @@ impl<'a> Mach<'a> {
 
 impl<'a> Object for Mach<'a> {
     fn to_bytes(artifact: &Artifact) -> error::Result<Vec<u8>> {
-        let mach = Mach::new(Some(artifact.name.to_owned()), artifact.target.clone());
+        let mach = Mach::new(Some(artifact.name.to_string()), artifact.target.clone());
         let mut buffer = Cursor::new(Vec::new());
         mach.write(&mut buffer)?;
         Ok(buffer.into_inner())
