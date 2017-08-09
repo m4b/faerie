@@ -5,9 +5,10 @@ extern crate ordermap;
 #[macro_use]
 extern crate log;
 
-pub use goblin::container::{self, Ctx};
+use goblin::container;
 pub use goblin::error as error;
 
+type Ctx = container::Ctx;
 pub type Code = Vec<u8>;
 pub type Data = Vec<u8>;
 
@@ -16,9 +17,6 @@ pub use target::Target;
 
 pub mod elf;
 pub use elf::Elf;
-
-pub mod mach;
-pub use mach::Mach;
 
 pub mod artifact;
 pub use artifact::{Object, Artifact};

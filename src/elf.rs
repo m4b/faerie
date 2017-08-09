@@ -1,5 +1,5 @@
 use goblin;
-use {error, Artifact, Object, Target, Code, Data};
+use {error, Artifact, Object, Target, Code, Data, Ctx};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -20,7 +20,6 @@ type Offset = usize;
 type Relocation = goblin::elf::reloc::Reloc;
 type Symbol = goblin::elf::sym::Sym;
 type Section = SectionHeader;
-type Ctx = goblin::container::Ctx;
 
 struct MachineTag(u16);
 
@@ -38,15 +37,23 @@ impl From<Target> for MachineTag {
     }
 }
 
+/// The kind of symbol this is; used in [SymbolBuilder](struct.SymbolBuilder.html)
 pub enum SymbolType {
+    /// A function
     Function,
-    Elf,
+    /// A data object
+    Object,
+    /// An impor
     Import,
+    /// A section reference
     Section,
+    /// A file reference
     File,
+    /// None
     None,
 }
 
+/// A builder for creating a 32/64 bit ELF symbol
 pub struct SymbolBuilder {
     name_offset: usize,
     global: bool,
@@ -55,6 +62,7 @@ pub struct SymbolBuilder {
 }
 
 impl SymbolBuilder {
+    /// Create a new symbol with `typ`
     pub fn new(typ: SymbolType) -> Self {
         SymbolBuilder {
             global: false,
@@ -63,15 +71,19 @@ impl SymbolBuilder {
             size: 0,
         }
     }
+    /// Set the size of this symbol; for functions, it should be the routines size in bytes
     pub fn size(mut self, size: usize) -> Self {
         self.size = size as u64; self
     }
+    /// Is this symbol global?
     pub fn global(mut self) -> Self {
         self.global = true; self
     }
+    /// Set the symbol name as a byte offset into the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
         self.name_offset = name_offset; self
     }
+    /// Finalize and create the symbol
     pub fn create(self) -> Symbol {
         use goblin::elf::sym::{STT_NOTYPE, STT_FILE, STT_FUNC, STT_SECTION, STT_OBJECT, STB_LOCAL, STB_GLOBAL};
         use goblin::elf::section_header::SHN_ABS;
@@ -82,7 +94,7 @@ impl SymbolBuilder {
             SymbolType::Function => {
                 st_info |= STT_FUNC;
             },
-            SymbolType::Elf => {
+            SymbolType::Object => {
                 st_info |= STT_OBJECT;
             },
             SymbolType::Import => {
@@ -119,6 +131,7 @@ impl SymbolBuilder {
     }
 }
 
+/// The kind of section this can be; used in [SectionBuilder](struct.SectionBuilder.html)
 pub enum SectionType {
     Bits,
     String,
@@ -128,6 +141,7 @@ pub enum SectionType {
     None,
 }
 
+/// A builder for creating a 32/64 bit section
 pub struct SectionBuilder {
     typ: SectionType,
     exec: bool,
@@ -137,6 +151,7 @@ pub struct SectionBuilder {
 }
 
 impl SectionBuilder {
+    /// Create a new section with `size`
     pub fn new(size: u64) -> Self {
         SectionBuilder {
             typ: SectionType::None,
@@ -146,15 +161,19 @@ impl SectionBuilder {
             size,
         }
     }
+    /// Make this section executable
     pub fn exec(mut self) -> Self {
         self.exec = true; self
     }
+    /// Set the byte offset of this section's name in the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
         self.name_offset = name_offset; self
     }
+    /// Set the type of this section
     fn section_type(mut self, typ: SectionType) -> Self {
         self.typ = typ; self
     }
+    /// Finalize and create the actual section
     pub fn create(self, ctx: &Ctx) -> Section {
         use goblin::elf::section_header::*;
         let mut shdr = Section::default();
@@ -200,6 +219,7 @@ impl SectionBuilder {
 }
 
 // r_offset: 17 r_typ: 4 r_sym: 12 r_addend: fffffffffffffffc rela: true,
+/// A builder for constructing a cross platform relocation
 pub struct RelocationBuilder {
     rel: bool,
     addend: isize,
@@ -209,6 +229,7 @@ pub struct RelocationBuilder {
 }
 
 impl RelocationBuilder {
+    /// Create a new relocation with `typ`
     pub fn new(typ: u32) -> Self {
         RelocationBuilder {
             rel: false,
@@ -218,19 +239,24 @@ impl RelocationBuilder {
             typ,
         }
     }
+    /// Set this relocation to a relocation without an addend
     pub fn rel(mut self) -> Self {
         self.rel = true; self
     }
+    /// Set this relocation's addend to `addend`, which also forces `rel = false`
     pub fn addend(mut self, addend: isize) -> Self {
         self.rel = false;
         self.addend = addend; self
     }
+    /// Set the section relative offset this relocation refers to
     pub fn offset(mut self, offset: usize) -> Self {
         self.offset = offset; self
     }
+    /// Set the symbol index this relocation affects
     pub fn sym(mut self, sym_idx: usize) -> Self {
         self.sym_idx = sym_idx; self
     }
+    /// Finalize and actually create this relocation
     pub fn create(self) -> Relocation {
         Relocation {
             r_offset: self.offset,
@@ -243,6 +269,7 @@ impl RelocationBuilder {
 }
 
 //#[derive(Debug)]
+/// An intermediate ELF object file container
 pub struct Elf {
     name: String,
     code: OrderMap<StringIndex, Code>,
@@ -379,7 +406,7 @@ impl Elf {
         let size = data.len();
         debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // TODO: extract this into a local function, DRY and shit
-        let mut symbol = SymbolBuilder::new(SymbolType::Elf).size(size).name_offset(offset).global().create();
+        let mut symbol = SymbolBuilder::new(SymbolType::Object).size(size).name_offset(offset).global().create();
         symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create(); //.name_offset(section_offset)
         // the symbols section reference/index will be the current number of sections
