@@ -18,6 +18,9 @@ pub use target::Target;
 pub mod elf;
 pub use elf::Elf;
 
+pub mod mach;
+pub use mach::Mach;
+
 pub mod artifact;
 pub use artifact::{Object, Artifact};
 
