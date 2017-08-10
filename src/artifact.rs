@@ -7,19 +7,19 @@ use Code;
 use Data;
 
 #[derive(Debug)]
-pub struct Artifact<'a> {
-    pub code: Vec<(&'a str, Code)>,
-    pub data: Vec<(&'a str, Data)>,
-    pub imports: Vec<&'a str>,
+pub struct Artifact {
+    pub code: Vec<(String, Code)>,
+    pub data: Vec<(String, Data)>,
+    pub imports: Vec<String>,
     pub target: Target,
     pub name: String,
-    pub import_links: Vec<(&'a str, &'a str, usize)>,
-    pub links: Vec<(&'a str, &'a str, usize)>,
+    pub import_links: Vec<(String, String, usize)>,
+    pub links: Vec<(String, String, usize)>,
     // relocations :/
 }
 
 // api completely subject to change
-impl<'a> Artifact<'a> {
+impl Artifact {
     pub fn new(target: Target, name: Option<String>) -> Self {
         Artifact {
             code: Vec::new(),
@@ -31,20 +31,20 @@ impl<'a> Artifact<'a> {
             target,
         }
     }
-    pub fn add_code(&mut self, name: &'a str, code: Code) {
-        self.code.push((name, code));
+    pub fn add_code<T: ToString>(&mut self, name: T, code: Code) {
+        self.code.push((name.to_string(), code));
     }
-    pub fn add_data(&mut self, name: &'a str, data: Data) {
-        self.data.push((name, data));
+    pub fn add_data<T: ToString>(&mut self, name: T, data: Data) {
+        self.data.push((name.to_string(), data));
     }
-    pub fn import(&mut self, import: &'a str) {
-        self.imports.push(import);
+    pub fn import<T: ToString>(&mut self, import: T) {
+        self.imports.push(import.to_string());
     }
-    pub fn link_import(&mut self, caller: &'a str, import: &'a str, offset: usize) {
-        self.import_links.push((caller, import, offset));
+    pub fn link_import<T: ToString>(&mut self, caller: T, import: T, offset: usize) {
+        self.import_links.push((caller.to_string(), import.to_string(), offset));
     }
-    pub fn link(&mut self, to: &'a str, from: &'a str, offset: usize) {
-        self.links.push((to, from, offset));
+    pub fn link<T: ToString>(&mut self, to: T, from: T, offset: usize) {
+        self.links.push((to.to_string(), from.to_string(), offset));
     }
     pub fn emit<O: Object>(&self) -> error::Result<Vec<u8>> {
         O::to_bytes(self)
