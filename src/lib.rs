@@ -22,7 +22,7 @@ pub mod mach;
 pub use mach::Mach;
 
 pub mod artifact;
-pub use artifact::{Object, Artifact};
+pub use artifact::{Object, Artifact, ArtifactBuilder};
 
 #[cfg(test)]
 mod tests {

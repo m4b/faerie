@@ -6,6 +6,37 @@ use Target;
 use Code;
 use Data;
 
+/// Builder for creating an artifact
+pub struct ArtifactBuilder {
+    target: Target,
+    name: Option<String>,
+    library: bool,
+}
+
+impl ArtifactBuilder {
+    /// Create a new Artifact with `target` machine architecture
+    pub fn new(target: Target) -> Self {
+        ArtifactBuilder {
+            target,
+            name: None,
+            library: false,
+        }
+    }
+    /// Set this artifacts name
+    pub fn name(mut self, name: String) -> Self {
+        self.name = Some(name); self
+    }
+    /// Set whether this will be a static library or not
+    pub fn library(mut self, is_library: bool) -> Self {
+        self.library = is_library; self
+    }
+    pub fn finish(self) -> Artifact {
+        let mut artifact = Artifact::new(self.target, self.name);
+        artifact.is_library = self.library;
+        artifact
+    }
+}
+
 #[derive(Debug)]
 /// An abstract binary artifact, which contains code, data, imports, and relocations
 pub struct Artifact {
@@ -16,6 +47,7 @@ pub struct Artifact {
     pub name: String,
     pub import_links: Vec<(String, String, usize)>,
     pub links: Vec<(String, String, usize)>,
+    pub is_library: bool,
     // relocations :/
 }
 
@@ -31,6 +63,7 @@ impl Artifact {
             links: Vec::new(),
             name: name.unwrap_or("goblin".to_owned()),
             target,
+            is_library: false,
         }
     }
     /// Add a new function with `name`, whose body is in `code`

@@ -10,7 +10,11 @@ use std::io::SeekFrom::*;
 use scroll::IOwrite;
 
 use goblin::mach::cputype;
+use goblin::mach::segment;
 use goblin::mach::header::{Header, MH_OBJECT, MH_SUBSECTIONS_VIA_SYMBOLS};
+
+type Section = segment::Section;
+type Segment<'a> = segment::Segment<'a>;
 // use goblin::mach::relocation::RelocationInfo;
 
 struct CpuType(cputype::CpuType);
@@ -60,8 +64,10 @@ impl<'a> Mach<'a> {
     }
     pub fn write<T: Write + Seek>(self, file: T) -> error::Result<()> {
         let mut file = BufWriter::new(file);
-        let header = self.header();
+        let mut header = self.header();
+        header.ncmds = 1;
         file.iowrite_with(header, self.ctx)?;
+        file.iowrite_with(Segment::new(self.ctx, &[]), self.ctx)?;
         let after_header = file.seek(Current(0))?;
         Ok(())
     }

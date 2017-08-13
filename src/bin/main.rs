@@ -6,7 +6,7 @@ extern crate structopt_derive;
 
 use structopt::StructOpt;
 
-use faerie::{error, Elf, Mach, Target, Artifact};
+use faerie::{error, Elf, Mach, Target, ArtifactBuilder};
 use std::path::Path;
 use std::fs::File;
 use std::env;
@@ -26,13 +26,16 @@ pub struct Args {
     #[structopt(long = "mach", help = "Output mach file")]
     mach: bool,
 
+    #[structopt(long = "library", help = "Output a static library")]
+    library: bool,
+
     #[structopt(help = "The filename to output")]
     filename: String,
 }
 
 fn run (args: Args) -> error::Result<()> {
     let file = File::create(Path::new(&args.filename))?;
-    let mut obj = Artifact::new(Target::X86_64, Some(args.filename));
+    let mut obj = ArtifactBuilder::new(Target::X86_64).name(args.filename).library(args.library).finish();
     // 55	push   %rbp
     // 48 89 e5	mov    %rsp,%rbp
     // b8 ef be ad de	mov    $0xdeadbeef,%eax
