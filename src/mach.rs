@@ -274,8 +274,8 @@ impl SymbolTable {
         // mach-o requires _ prefixes on every symbol, we will allow this to be configurable later
         //let name = format!("_{}", symbol_name);
         let name = symbol_name;
-        // 1 for null terminator
-        let name_len = name.len() + 1;
+        // 1 for null terminator and 1 for _ prefix (defered until write time);
+        let name_len = name.len() + 1 + 1;
         let last_index = self.strtable.len();
         let name_index = self.strtable.get_or_intern(name);
         debug!("{}: {} <= {}", symbol_name, last_index, name_index);
@@ -473,11 +473,12 @@ impl<'a> Mach<'a> {
         //////////////////////////////
         // write strtable
         //////////////////////////////
-        // FIXME: will write _ mach required prefixes here later via config if necessary
-        for (idx, string) in self.symtab.strtable.into_iter() {
+        // we need to write first, empty element - but without an underscore
+        file.iowrite(0u8)?;
+        for (idx, string) in self.symtab.strtable.into_iter().skip(1) {
             debug!("{}: {:?}", idx, string);
             // yup, an underscore
-            // file.iowrite(0x5fu8)?;
+            file.iowrite(0x5fu8)?;
             file.write(string.as_bytes())?;
             file.iowrite(0u8)?;
         }
