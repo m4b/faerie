@@ -50,6 +50,7 @@ pub struct SymbolBuilder {
     section: Option<SectionIndex>,
     global: bool,
     import: bool,
+    offset: usize,
 }
 
 impl SymbolBuilder {
@@ -60,6 +61,7 @@ impl SymbolBuilder {
             section: None,
             global: false,
             import: false,
+            offset: 0,
         }
     }
     /// The section this symbol belongs to
@@ -69,6 +71,9 @@ impl SymbolBuilder {
     /// Is this symbol global?
     pub fn global(mut self) -> Self {
         self.global = true; self
+    }
+    pub fn offset(mut self, offset: usize) -> Self {
+        self.offset = offset; self
     }
     /// Is this symbol an import?
     pub fn import(mut self) -> Self {
@@ -81,8 +86,7 @@ impl SymbolBuilder {
         let n_strx = self.name;
         let mut n_sect = 0;
         let mut n_type = N_UNDF;
-        // FIXME:
-        let n_value = 0;
+        let mut n_value = self.offset as u64;
         let n_desc = 0;
         if self.global {
             n_type |= N_EXT;
@@ -98,6 +102,7 @@ impl SymbolBuilder {
             n_sect = NO_SECT as usize;
             // FIXME: this is broken i believe; we need to make it both undefined + global for imports
             n_type = N_EXT;
+            n_value = 0;
         } else {
             n_type |= N_SECT;
         }
@@ -232,8 +237,8 @@ pub struct SymbolTable {
 
 /// The kind of symbol this is
 pub enum SymbolType {
-    /// Which section this is defined in
-    Defined(SectionIndex),
+    /// Which `section` this is defined in, and at what `offset`
+    Defined { section: SectionIndex, offset: usize },
     /// An undefined symbol (an import)
     Undefined,
 }
@@ -269,7 +274,7 @@ impl SymbolTable {
         // mach-o requires _ prefixes on every symbol, we will allow this to be configurable later
         //let name = format!("_{}", symbol_name);
         let name = symbol_name;
-        // for null terminator;
+        // 1 for null terminator
         let name_len = name.len() + 1;
         let last_index = self.strtable.len();
         let name_index = self.strtable.get_or_intern(name);
@@ -280,7 +285,7 @@ impl SymbolTable {
             // TODO: add code offset into symbol n_value
             let builder = match kind {
                 SymbolType::Undefined => SymbolBuilder::new(self.strtable_size).global().import(),
-                SymbolType::Defined(section) => SymbolBuilder::new(self.strtable_size).global().section(section)
+                SymbolType::Defined { section, offset } => SymbolBuilder::new(self.strtable_size).global().offset(offset). section(section)
             };
             // insert the builder for this symbol, using its strtab index;
             self.symbols.insert(name_index, builder);
@@ -328,11 +333,12 @@ impl<'a> Mach<'a> {
             _p: ::std::marker::PhantomData::default(),
         }
     }
-    fn build_section(&mut self, sectname: &'static str, segname: &'static str, offset: &mut usize, addr: &mut usize, section: SectionIndex, raw: & [(String, Vec<u8>)]) -> SectionBuilder {
+    fn build_section(&mut self, sectname: &'static str, segname: &'static str, offset: &mut usize, addr: &mut usize, symbol_offset: &mut usize, section: SectionIndex, raw: & [(String, Vec<u8>)]) -> SectionBuilder {
         let mut size = 0;
         for &(ref name, ref code) in raw {
             size += code.len();
-            self.symtab.insert(name, SymbolType::Defined(section));
+            self.symtab.insert(name, SymbolType::Defined { section, offset: *symbol_offset });
+            *symbol_offset += code.len();
         }
         let section = SectionBuilder::new(sectname, segname, size).offset(*offset).addr(*addr);
         *offset += size;
@@ -340,10 +346,12 @@ impl<'a> Mach<'a> {
         section
     }
     fn sections(&mut self, code: &ArtifactCode, data: &ArtifactData, imports: &ArtifactImports) -> Sections {
+        //let mut offset = Header::size_with(&self.ctx.container) + (2 * Section::size_with(&self.ctx));
         let mut offset = Header::size_with(&self.ctx.container);
         let mut addr = 0;
-        let text = self.build_section("__text", "__TEXT", &mut offset, &mut addr, CODE_SECTION_INDEX ,&code);
-        let data = self.build_section("__data", "__DATA", &mut offset, &mut addr, DATA_SECTION_INDEX, &data);
+        let mut symbol_offset = 0;
+        let text = self.build_section("__text", "__TEXT", &mut offset, &mut addr, &mut symbol_offset, CODE_SECTION_INDEX ,&code);
+        let data = self.build_section("__data", "__DATA", &mut offset, &mut addr, &mut symbol_offset, DATA_SECTION_INDEX, &data);
         for import in imports {
             self.symtab.insert(import, SymbolType::Undefined);
         }
@@ -352,7 +360,7 @@ impl<'a> Mach<'a> {
         debug!("Section offset: {} - Segment Size: {} Symtable Offset: {}", offset, addr, offset + addr);
         [text, data]
     }
-    fn header(&self) -> Header {
+    fn header(&self, sizeofcmds: usize) -> Header {
         let mut header = Header::new(&self.ctx);
         header.filetype = MH_OBJECT;
         // safe to divide up the sections into sub-sections via symbols for dead code stripping
@@ -360,12 +368,12 @@ impl<'a> Mach<'a> {
         header.cputype = CpuType::from(self.target).0;
         header.cpusubtype = 3;
         header.ncmds = 2;
+        header.sizeofcmds = sizeofcmds as u32;
         header
     }
     pub fn write<T: Write + Seek>(self, file: T, sections: Sections, relocations: Relocations) -> error::Result<()> {
         let mut file = BufWriter::new(file);
         let ctx = self.ctx.clone();
-        let mut header = self.header();
 
         // FIXME: this is ugly af, need cmdsize to get symtable offset
         // construct symtab command
@@ -375,17 +383,20 @@ impl<'a> Mach<'a> {
         let symtable_offset = self.segment_offset + sizeof_load_commands;
         let strtable_offset = symtable_offset + (self.symtab.len() * Nlist::size_with(&self.ctx));
         let relocation_offset_start = strtable_offset + self.symtab.sizeof_strtable();
-
+        let first_section_offset = Header::size_with(&self.ctx) + sizeof_load_commands;
         // start with setting the headers dependent value
-        header.sizeofcmds = sizeof_load_commands as u32;
+        let header = self.header(sizeof_load_commands);
         
         debug!("Symtable: {:#?}", self.symtab);
         // marshall the sections into something we can actually write
         // FIXME: add relocation offset + number
         let mut raw_sections = Cursor::new(Vec::<u8>::new());
         let mut relocation_offset = relocation_offset_start;
+        let mut section_offset = first_section_offset;
         for (idx, section) in sections.into_iter().cloned().enumerate() {
             let mut section: Section = section.create();
+            section.offset = section_offset as u32;
+            section_offset += section.size as usize;
             debug!("{}: Setting nrelocs", idx);
             if idx < relocations.len() {
                 let nrelocs = relocations[idx].len();
@@ -397,7 +408,7 @@ impl<'a> Mach<'a> {
             raw_sections.iowrite_with(section, self.ctx)?;
         }
         let raw_sections = raw_sections.into_inner();
-        debug!("Raw sections len: {} - Section start: {} Strtable size: {}", raw_sections.len(), self.segment_offset, self.symtab.sizeof_strtable());
+        debug!("Raw sections len: {} - Section start: {} Strtable size: {} - Segment size: {}", raw_sections.len(), first_section_offset, self.symtab.sizeof_strtable(), self.segment_size);
 
         let mut segment_load_command = Segment::new(self.ctx, &raw_sections);
         segment_load_command.nsects = sections.len() as u32;
@@ -406,7 +417,7 @@ impl<'a> Mach<'a> {
         segment_load_command.maxprot = 7;
         segment_load_command.filesize = self.segment_size as u64;
         segment_load_command.vmsize = segment_load_command.filesize;
-        segment_load_command.fileoff = self.segment_offset as u64;
+        segment_load_command.fileoff = first_section_offset as u64;
         debug!("Segment: {:#?}", segment_load_command);
 
         debug!("Symtable Offset: {:#?}", symtable_offset);
@@ -453,8 +464,7 @@ impl<'a> Mach<'a> {
         // write symtable
         //////////////////////////////
         for (idx, symbol) in self.symtab.symbols.into_iter() {
-            let mut symbol = symbol.create();
-            symbol.n_value = 10;
+            let symbol = symbol.create();
             debug!("{}: {:?}", idx, symbol);
             file.iowrite_with(symbol, self.ctx)?;
         }
@@ -466,6 +476,8 @@ impl<'a> Mach<'a> {
         // FIXME: will write _ mach required prefixes here later via config if necessary
         for (idx, string) in self.symtab.strtable.into_iter() {
             debug!("{}: {:?}", idx, string);
+            // yup, an underscore
+            // file.iowrite(0x5fu8)?;
             file.write(string.as_bytes())?;
             file.iowrite(0u8)?;
         }
@@ -490,7 +502,7 @@ impl<'a> Mach<'a> {
 }
 
 fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
-    use goblin::mach::relocation::X86_64_RELOC_BRANCH;
+    use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED};
     let mut text_relocations = Vec::new();
     debug!("Generating relocations for import links: {}", &artifact.import_links.len());
     for &(ref from, ref to, offset) in &artifact.import_links {
@@ -503,6 +515,17 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
             None => error!("Relocation from {} to {} at {:#x} does not have a known import symbol {} (did you add an extra _?). Dumping strtable {:?}", from, to, offset, to, symtab.strtable)
         }
     }
+    for &(ref to, ref from, offset) in &artifact.links {
+        debug!("Data links for: from {} to {} at {:#x}", from, to, offset);
+        match (symtab.index(from), symtab.index(to)) {
+            (Some(from_symbol_index), Some(_)) => {
+                let reloc = RelocationBuilder::new(from_symbol_index, offset, X86_64_RELOC_SIGNED).create();
+                text_relocations.push(reloc);
+            },
+            _ => error!("Relocation from {} to {} at {:#x} does not have a known import symbol {} (did you add an extra _?). Dumping strtable {:?}", from, to, offset, to, symtab.strtable)
+        }
+
+    }
     vec![text_relocations]
 }
 
@@ -512,7 +535,6 @@ impl<'a> Object for Mach<'a> {
         let mut mach = Mach::new(&artifact);
         let sections = mach.sections(&artifact.code, &artifact.data, &artifact.imports);
         let relocations = build_relocations(&artifact, &mach.symtab);
-        //debug!("Post sections: {:#?}", mach);
         let mut buffer = Cursor::new(Vec::new());
         mach.write(&mut buffer, sections, relocations)?;
         Ok(buffer.into_inner())
