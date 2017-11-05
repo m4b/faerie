@@ -6,7 +6,7 @@ readme = "README.md"
 keywords = ["sidhe", "binary", "object", "compiler", "emit"]
 repository = "https://github.com/m4b/faerie"
 license = "MIT"
-description = "Prototype native binary object file emitter"
+description = "ELF and Mach-o native binary object file emitter"
 
 [[bin]]
 name = "prototype"
@@ -17,6 +17,7 @@ goblin = { git = "https://github.com/m4b/goblin" }
 scroll = "0.7"
 log = "0.3.8"
 env_logger = "0.4.3"
+# remove this, #10
 shawshank = "0.2.3"
 ordermap = "0.2.10"
 structopt = "0.1.0"
