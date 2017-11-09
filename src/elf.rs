@@ -338,8 +338,8 @@ impl Elf {
                 (idx, offset)
             };
 
-            push_strtab("strtab");
-            push_strtab("symtab");
+            push_strtab(".strtab");
+            push_strtab(".symtab");
             let (idx, offset) = push_strtab(&name);
             // NOTE: using 0 as the idx is a hack;
             // but we need to insert a null symbol as the first symbol, otherwise linkers explode
