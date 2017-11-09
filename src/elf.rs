@@ -146,6 +146,7 @@ pub struct SectionBuilder {
     typ: SectionType,
     exec: bool,
     write: bool,
+    alloc: bool,
     size: u64,
     name_offset: usize,
 }
@@ -157,6 +158,7 @@ impl SectionBuilder {
             typ: SectionType::None,
             exec: false,
             write: false,
+            alloc: true,
             name_offset: 0,
             size,
         }
@@ -164,6 +166,10 @@ impl SectionBuilder {
     /// Make this section executable
     pub fn exec(mut self) -> Self {
         self.exec = true; self
+    }
+    /// Make this section non-allocatable
+    pub fn no_alloc(mut self) -> Self {
+        self.alloc = false; self
     }
     /// Set the byte offset of this section's name in the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
@@ -177,7 +183,7 @@ impl SectionBuilder {
     pub fn create(self, ctx: &Ctx) -> Section {
         use goblin::elf::section_header::*;
         let mut shdr = Section::default();
-        shdr.sh_flags = SHF_ALLOC as u64;
+        shdr.sh_flags = 0u64;
         shdr.sh_size = self.size;
         shdr.sh_name = self.name_offset;
         if self.exec {
@@ -185,6 +191,9 @@ impl SectionBuilder {
         }
         if self.write {
             shdr.sh_flags |= SHF_WRITE as u64
+        }
+        if self.alloc {
+            shdr.sh_flags |= SHF_ALLOC as u64
         }
         match self.typ {
             SectionType::Bits => {
@@ -349,7 +358,7 @@ impl Elf {
             symbols:     OrderMap::new(),
             section_symbols,
             sections:    HashMap::new(),
-            nsections:   3,
+            nsections:   4,
             offsets,
             strings,
             sizeof_strtab,
@@ -479,6 +488,7 @@ impl Elf {
         /////////////////////////////////////
         let sizeof_symtab = (self.symbols.len() + self.section_symbols.len()) * Symbol::size(self.ctx.container);
         let sizeof_relocs = self.relocations.iter().fold(0, |acc, (_, &(ref _shdr, ref rels))| rels.len() + acc) * Relocation::size(true, self.ctx);
+        let nonexec_stack_note_name_offset = self.new_string(".note.GNU-stack".into()).1;
         let strtab_offset = self.sizeof_bits as u64;
         let symtab_offset = strtab_offset + self.sizeof_strtab as u64;
         let reloc_offset = symtab_offset + sizeof_symtab as u64;
@@ -597,6 +607,16 @@ impl Elf {
                 file.iowrite_with(relocation, (relocation.is_rela, self.ctx))?;
             }
         }
+
+        /////////////////////////////////////
+        // Non-executable stack note.
+        /////////////////////////////////////
+        let nonexec_stack = SectionBuilder::new(0)
+            .name_offset(nonexec_stack_note_name_offset)
+            .section_type(SectionType::Bits)
+            .no_alloc()
+            .create(&self.ctx);
+        section_headers.push(nonexec_stack);
 
         /////////////////////////////////////
         // Sections
