@@ -167,7 +167,7 @@ impl SectionBuilder {
     pub fn exec(mut self) -> Self {
         self.exec = true; self
     }
-    /// Make this section non-allocatable
+    /// Make this section allocatable
     pub fn alloc(mut self) -> Self {
         self.alloc = true; self
     }
