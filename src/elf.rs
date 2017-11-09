@@ -158,7 +158,7 @@ impl SectionBuilder {
             typ: SectionType::None,
             exec: false,
             write: false,
-            alloc: true,
+            alloc: false,
             name_offset: 0,
             size,
         }
@@ -168,8 +168,8 @@ impl SectionBuilder {
         self.exec = true; self
     }
     /// Make this section non-allocatable
-    pub fn no_alloc(mut self) -> Self {
-        self.alloc = false; self
+    pub fn alloc(mut self) -> Self {
+        self.alloc = true; self
     }
     /// Set the byte offset of this section's name in the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
@@ -396,7 +396,7 @@ impl Elf {
         self.section_symbols.insert(idx, section_symbol);
         // FIXME: probably add padding alignment
         // create a PROGBITS section based on these code bytes
-        let mut section = SectionBuilder::new(size as u64).name_offset(section_offset).section_type(SectionType::Bits).exec().create(&self.ctx);
+        let mut section = SectionBuilder::new(size as u64).name_offset(section_offset).section_type(SectionType::Bits).alloc().exec().create(&self.ctx);
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
         self.sections.insert(idx, section);
@@ -424,7 +424,7 @@ impl Elf {
         self.symbols.insert(idx, symbol);
         self.section_symbols.insert(idx, section_symbol);
 
-        let mut section = SectionBuilder::new(size as u64).name_offset(section_offset).section_type(SectionType::String).create(&self.ctx);
+        let mut section = SectionBuilder::new(size as u64).name_offset(section_offset).section_type(SectionType::String).alloc().create(&self.ctx);
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
         section.sh_entsize = 1;
@@ -614,7 +614,6 @@ impl Elf {
         let nonexec_stack = SectionBuilder::new(0)
             .name_offset(nonexec_stack_note_name_offset)
             .section_type(SectionType::Bits)
-            .no_alloc()
             .create(&self.ctx);
         section_headers.push(nonexec_stack);
 
