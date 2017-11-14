@@ -6,6 +6,27 @@ use Target;
 use Code;
 use Data;
 
+pub type Relocation = (String, String, usize);
+
+/// An abstract relocation linking one symbol to another, at an offset
+pub struct Link<'a> {
+    /// The relocation is relative `from` this symbol
+    pub from: &'a str,
+    /// The relocation is `to` this symbol
+    pub to: &'a str,
+    /// The byte offset _relative_ to `from` where the relocation should be performed
+    pub at: usize,
+}
+
+/// The kind of import this is - either a function, or a copy relocation of data from a shared library
+#[derive(Debug, Clone)]
+pub enum ImportKind {
+    /// A function
+    Function,
+    /// An imported piece of data
+    Data,
+}
+
 /// Builder for creating an artifact
 pub struct ArtifactBuilder {
     target: Target,
@@ -40,15 +61,14 @@ impl ArtifactBuilder {
 #[derive(Debug)]
 /// An abstract binary artifact, which contains code, data, imports, and relocations
 pub struct Artifact {
-    pub code: Vec<(String, Code)>,
-    pub data: Vec<(String, Data)>,
-    pub imports: Vec<String>,
-    pub target: Target,
     pub name: String,
-    pub import_links: Vec<(String, String, usize)>,
-    pub links: Vec<(String, String, usize)>,
+    pub target: Target,
     pub is_library: bool,
-    // relocations :/
+    code: Vec<(String, Code)>,
+    data: Vec<(String, Data)>,
+    imports: Vec<(String, ImportKind)>,
+    import_links: Vec<Relocation>,
+    links: Vec<Relocation>,
 }
 
 // api completely subject to change
@@ -66,25 +86,45 @@ impl Artifact {
             is_library: false,
         }
     }
+    /// Get this artifacts code vector
+    pub fn code(&self) -> &[(String, Code)] {
+        &self.code
+    }
+    /// Get this artifacts data vector
+    pub fn data(&self) -> &[(String, Data)] {
+        &self.data
+    }
+    /// Get this artifacts import vector
+    pub fn imports(&self) -> &[(String, ImportKind)] {
+        &self.imports
+    }
+    /// Get this artifacts relocations
+    pub fn links(&self) -> &[(Relocation)] {
+        &self.links
+    }
+    /// Get this artifacts import relocations
+    pub fn import_links(&self) -> &[(Relocation)] {
+        &self.import_links
+    }
     /// Add a new function with `name`, whose body is in `code`
-    pub fn add_code<T: ToString>(&mut self, name: T, code: Code) {
-        self.code.push((name.to_string(), code));
+    pub fn add_code<T: AsRef<str>>(&mut self, name: T, code: Code) {
+        self.code.push((name.as_ref().to_string(), code));
     }
     /// Add a byte blob of non-function data
-    pub fn add_data<T: ToString>(&mut self, name: T, data: Data) {
-        self.data.push((name.to_string(), data));
+    pub fn add_data<T: AsRef<str>>(&mut self, name: T, data: Data) {
+        self.data.push((name.as_ref().to_string(), data));
     }
-    /// Create a new function import, to be used subsequently in [link_import](struct.Artifact.method#import.html)
-    pub fn import<T: ToString>(&mut self, import: T) {
-        self.imports.push(import.to_string());
+    /// Create a new function import, to be used subsequently in [link_import](struct.Artifact.method#link_import.html)
+    pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) {
+        self.imports.push((import.as_ref().to_string(), kind));
     }
-    /// Link a new relocation at `offset` into `caller`, for `import`
-    pub fn link_import<T: ToString>(&mut self, caller: T, import: T, offset: usize) {
-        self.import_links.push((caller.to_string(), import.to_string(), offset));
+    /// Link a new relocation at offset `Link.at` into the caller at `Link.from`, for the import at `Link.to`
+    pub fn link_import<'a>(&mut self, link: Link<'a>) {
+        self.import_links.push((link.from.to_string(), link.to.to_string(), link.at));
     }
-    /// link a relocation into `object` at `offset`, referring to `reference` (currently, this will be a simple data object, like a string you previously added via add_data)
-    pub fn link<T: ToString>(&mut self, object: T, reference: T, offset: usize) {
-        self.links.push((object.to_string(), reference.to_string(), offset));
+    /// Link a relocation into `object` at `offset`, referring to `reference` (currently, this will be a simple data object, like a string you previously added via add_data)
+    pub fn link<'a>(&mut self, link: Link<'a>) {
+        self.links.push((link.from.to_string(), link.to.to_string(), link.at));
     }
     /// Emit a blob of bytes that represents this object file
     pub fn emit<O: Object>(&self) -> error::Result<Vec<u8>> {

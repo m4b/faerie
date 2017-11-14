@@ -1,5 +1,5 @@
 use goblin;
-use {error, Artifact, Object, Target, Code, Data, Ctx};
+use {error, Artifact, Object, Target, Code, Data, Ctx, ImportKind};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -286,7 +286,7 @@ pub struct Elf {
     relocations: OrderMap<StringIndex, (Section, Vec<Relocation>)>,
     symbols: OrderMap<StringIndex, Symbol>,
     section_symbols: OrderMap<StringIndex, Symbol>,
-    imports: HashMap<StringIndex, u64>,
+    imports: HashMap<StringIndex, ImportKind>,
     sections: HashMap<StringIndex, Section>,
     offsets: HashMap<StringIndex, Offset>,
     sizeof_strtab: Offset,
@@ -434,17 +434,30 @@ impl Elf {
 
         self.data.insert(idx, data);
     }
-    pub fn import(&mut self, import: String) {
+    pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
         let symbol = SymbolBuilder::new(SymbolType::Import).name_offset(offset).create();
+        self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
     pub fn link_import(&mut self, caller: &str, import: &str, offset: usize) {
         let idx = self.strings.intern(caller).unwrap();
         let import_idx = self.strings.intern(import).unwrap();
+        let reloc = match self.imports.get(&import_idx) {
+            Some(&ImportKind::Function) => reloc::R_X86_64_PLT32,
+            Some(&ImportKind::Data) => reloc::R_X86_64_GOTPCREL,
+            // FIXME: this should be more principled (i.e., die at this point) instead of returning PLT32.
+            // currently this is required since we add `link_import` for a local deadbeef function since
+            // `link` has no way of emitting a call relocation
+            // Consequently, we will likely need to "resolve" imports when `link` is called (and remove `link_import` from artifact)
+            // but this has the side effect of requiring all code/data/imports to be called before any `link` is called
+            // which isn't that big of a deal but current version is nice in that order of operations on artifact has no effect
+            None => reloc::R_X86_64_PLT32,
+        };
         let (idx, _, _) = self.symbols.get_pair_index(&idx).unwrap();
+        // FIXME: if incorrect import name in artifact.import() is given this will panic
         let (import_idx, _, _) = self.symbols.get_pair_index(&import_idx).unwrap();
-        let mut reloc = RelocationBuilder::new(reloc::R_X86_64_PLT32).sym(import_idx + self.section_symbols.len()).offset(offset).create();
+        let mut reloc = RelocationBuilder::new(reloc).sym(import_idx + self.section_symbols.len()).offset(offset).create();
         reloc.r_addend = -4;
         self.add_reloc(caller, reloc, idx)
     }
@@ -637,20 +650,20 @@ impl Elf {
 impl Object for Elf {
     fn to_bytes(artifact: &Artifact) -> error::Result<Vec<u8>> {
         let mut elf = Elf::new(Some(artifact.name.to_owned()), artifact.target.clone());
-        for &(ref name, ref code) in &artifact.code {
+        for &(ref name, ref code) in artifact.code() {
             // todo just make this a reference, since we need to copy into the vector of bytes anyway
             elf.add_code(name.to_string(), code.clone());
         }
-        for &(ref name, ref data) in &artifact.data {
+        for &(ref name, ref data) in artifact.data() {
             elf.add_data(name.to_string(), data.clone());
         }
-        for &(ref referrer, ref referree, ref offset) in &artifact.links {
+        for &(ref referrer, ref referree, ref offset) in artifact.links() {
             elf.link(referrer, referree, *offset);
         }
-        for import in &artifact.imports {
-            elf.import(import.to_string());
+        for &(ref import, ref kind) in artifact.imports() {
+            elf.import(import.to_string(), kind);
         }
-        for &(ref caller, ref import, ref offset) in &artifact.import_links {
+        for &(ref caller, ref import, ref offset) in artifact.import_links() {
             elf.link_import(caller, import, *offset);
         }
         let mut buffer = Cursor::new(Vec::new());

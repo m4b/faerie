@@ -6,10 +6,11 @@ extern crate structopt_derive;
 
 use structopt::StructOpt;
 
-use faerie::{error, Elf, Mach, Target, ArtifactBuilder};
+use faerie::{error, Link, Elf, Mach, Target, ArtifactBuilder, ImportKind};
 use std::path::Path;
 use std::fs::File;
 use std::env;
+use std::process::Command;
 
 // ELF linking
 // ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crt1.o food.o -lc -o food
@@ -20,6 +21,9 @@ use std::env;
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "prototype", about = "This is prototype binary for emitting object files; it is only meant for debugging, a reference, etc. - Knock yourself out")]
 pub struct Args {
+    #[structopt(short = "l", long = "link", help = "Link the file with this name")]
+    link: Option<String>,
+
     #[structopt(short = "d", long = "debug", help = "Enable debug")]
     debug: bool,
 
@@ -31,20 +35,32 @@ pub struct Args {
 
     #[structopt(help = "The filename to output")]
     filename: String,
+
+    #[structopt(help = "Additional files to link")]
+    linkline: Vec<String>
 }
 
 fn run (args: Args) -> error::Result<()> {
     let file = File::create(Path::new(&args.filename))?;
-    let mut obj = ArtifactBuilder::new(Target::X86_64).name(args.filename).library(args.library).finish();
-    // 55	push   %rbp
-    // 48 89 e5	mov    %rsp,%rbp
-    // b8 ef be ad de	mov    $0xdeadbeef,%eax
-    // 5d	pop    %rbp
-    // c3	retq
+    let mut obj = ArtifactBuilder::new(Target::X86_64).name(args.filename.clone()).library(args.library).finish();
+
+    // 0000000000000000 <deadbeef>:
+    //    0:	55                   	push   %rbp
+    //    1:	48 89 e5             	mov    %rsp,%rbp
+    //    4:	48 8b 05 00 00 00 00 	mov    0x0(%rip),%rax        # b <deadbeef+0xb>
+    // 			7: R_X86_64_GOTPCREL	DEADBEEF-0x4
+    //    b:	8b 08                	mov    (%rax),%ecx
+    //    d:	83 c1 01             	add    $0x1,%ecx
+    //   10:	89 c8                	mov    %ecx,%eax
+    //   12:	5d                   	pop    %rbp
+    //   13:	c3                   	retq
     obj.add_code("deadbeef",
         vec![0x55,
              0x48, 0x89, 0xe5,
-             0xb8, 0xef, 0xbe, 0xad, 0xde,
+             0x48, 0x8b, 0x05, 0x00, 0x00, 0x00, 0x00,
+             0x8b, 0x08,
+             0x83, 0xc1, 0x01,
+             0x89, 0xc8,
              0x5d,
              0xc3]);
     // main:
@@ -73,16 +89,41 @@ fn run (args: Args) -> error::Result<()> {
              0xc3]);
     obj.add_data("str.1", b"deadbeef: 0x%x\n\0".to_vec());
     // relocations are relative to the symbol
-    obj.link("main", "str.1", 19);
-    obj.import("printf");
-    obj.link_import("main", "printf", 29);
-    obj.link_import("main", "deadbeef", 10);
+    obj.link(Link { from: "main", to: "str.1", at: 19 });
+    obj.import("printf", ImportKind::Function);
+    obj.import("DEADBEEF", ImportKind::Data);
+    obj.link_import(Link { from: "main", to: "printf", at: 29 });
+    obj.link_import(Link { from: "main", to: "deadbeef", at: 10 });
+    obj.link_import(Link { from: "deadbeef", to: "DEADBEEF", at: 7 });
     if args.mach {
         obj.write::<Mach>(file)?;
     } else {
         obj.write::<Elf>(file)?;
         println!("res: {:#?}", obj);
     }
+    if let Some(output) = args.link {
+        link(&args.filename, &output, &args.linkline)?;
+    }
+    Ok(())
+}
+
+fn link(name: &str, output: &str, linkline: &[String]) -> error::Result<()> {
+    //ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
+    let child = Command::new("ld")
+                        .args(&["-e", "_start",
+                                "-I", "/usr/lib/ld-linux-x86-64.so.2",
+                                "-L", "/usr/lib/",
+                                "/usr/lib/crti.o",
+                                "/usr/lib/Scrt1.o",
+                                "/usr/lib/crtn.o"])
+                        .args(linkline)
+                        .args(&[name,
+                                "-l", "c",
+                                "-o", output,
+                            ])
+                        .spawn()?;
+    let child = child.wait_with_output()?;
+    println!("{}", ::std::str::from_utf8(child.stdout.as_slice()).unwrap());
     Ok(())
 }
 

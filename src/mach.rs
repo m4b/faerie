@@ -344,9 +344,9 @@ impl SegmentBuilder {
         let mut offset = Header::size_with(&ctx.container);
         let mut size = 0;
         let mut symbol_offset = 0;
-        let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX ,&artifact.code);
-        let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &artifact.data);
-        for import in &artifact.imports {
+        let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX ,artifact.code());
+        let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, artifact.data());
+        for &(ref import, ref kind) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
         }
         // FIXME re add assert
@@ -379,8 +379,8 @@ impl<'a> Mach<'a> {
         let target = artifact.target.clone();
         let ctx = Ctx::from(target);
         // we could alternatively pass this in the write method, but this is fine
-        let code = &artifact.code;
-        let data = &artifact.data;
+        let code = artifact.code();
+        let data = artifact.data();
 
         let mut symtab = SymbolTable::new();
         let segment = SegmentBuilder::new(&artifact, &mut symtab, &ctx);
@@ -540,8 +540,8 @@ impl<'a> Mach<'a> {
 fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED};
     let mut text_relocations = Vec::new();
-    debug!("Generating relocations for import links: {}", &artifact.import_links.len());
-    for &(ref from, ref to, offset) in &artifact.import_links {
+    debug!("Generating relocations for import links: {}", artifact.import_links().len());
+    for &(ref from, ref to, offset) in artifact.import_links() {
         debug!("Import links for: from {} to {} at {:#x}", from, to, offset);
         match (symtab.offset(from), symtab.index(to)) {
             (Some(base_offset), Some(to_symbol_index)) => {
@@ -552,7 +552,7 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
             _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", from, to, offset, symtab)
         }
     }
-    for &(ref to, ref from, offset) in &artifact.links {
+    for &(ref to, ref from, offset) in artifact.links() {
         debug!("Data links for: from {} to {} at {:#x}", from, to, offset);
         match (symtab.index(from), symtab.offset(to)) {
             (Some(from_symbol_index), Some(base_offset)) => {
