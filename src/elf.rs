@@ -1,5 +1,5 @@
 use goblin;
-use {error, Artifact, Object, Target, Code, Data, Ctx, ImportKind};
+use {error, artifact, Artifact, Object, Target, Code, Data, Ctx, ImportKind};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -440,6 +440,7 @@ impl Elf {
         self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
+    // FIXME/DEPRECATED - switch to just using link below
     pub fn link_import(&mut self, caller: &str, import: &str, offset: usize) {
         let idx = self.strings.intern(caller).unwrap();
         let import_idx = self.strings.intern(import).unwrap();
@@ -461,15 +462,21 @@ impl Elf {
         reloc.r_addend = -4;
         self.add_reloc(caller, reloc, idx)
     }
-    pub fn link(&mut self, to: &str, from: &str, offset: usize) {
+    pub fn link(&mut self, to: &str, from: &str, offset: usize, to_type: &artifact::SymbolType) {
         let idx = self.strings.intern(to).unwrap();
         let from_idx = self.strings.intern(from).unwrap();
         let (idx, _, _) = self.symbols.get_pair_index(&idx).unwrap();
         let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx).unwrap();
         // +2 for NOTYPE and FILE symbols
-        let mut reloc = RelocationBuilder::new(reloc::R_X86_64_PC32).sym(from_idx + 2).offset(offset).create();
-        // TODO: figure out wtf addends are for ;)
-        reloc.r_addend = 0;
+        let (reloc, addend) = match *to_type {
+            // NB: this now forces _all_ function references, whether local or not, through the PLT
+            // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
+            artifact::SymbolType::Function {..} => (reloc::R_X86_64_PLT32, -4),
+            artifact::SymbolType::Data {..} => (reloc::R_X86_64_PC32, 0),
+            artifact::SymbolType::FunctionImport => (reloc::R_X86_64_PLT32, -4),
+            artifact::SymbolType::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+        };
+        let reloc = RelocationBuilder::new(reloc).sym(from_idx + 2).offset(offset).addend(addend).create();
         self.add_reloc(to, reloc, idx)
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize) {
@@ -657,8 +664,8 @@ impl Object for Elf {
         for &(ref name, ref data) in artifact.data() {
             elf.add_data(name.to_string(), data.clone());
         }
-        for &(ref referrer, ref referree, ref offset) in artifact.links() {
-            elf.link(referrer, referree, *offset);
+        for (link, types) in artifact.links2() {
+            elf.link(link.from, link.to, link.at, types.to_type);
         }
         for &(ref import, ref kind) in artifact.imports() {
             elf.import(import.to_string(), kind);

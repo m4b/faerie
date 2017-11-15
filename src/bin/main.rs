@@ -3,10 +3,12 @@ extern crate env_logger;
 extern crate structopt;
 #[macro_use]
 extern crate structopt_derive;
+extern crate failure;
 
 use structopt::StructOpt;
+use failure::Error;
 
-use faerie::{error, Link, Elf, Mach, Target, ArtifactBuilder, ImportKind};
+use faerie::{Link, Elf, Mach, Target, ArtifactBuilder, SymbolType};
 use std::path::Path;
 use std::fs::File;
 use std::env;
@@ -19,7 +21,8 @@ use std::process::Command;
 // ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
 
 #[derive(StructOpt, Debug, Clone)]
-#[structopt(name = "prototype", about = "This is prototype binary for emitting object files; it is only meant for debugging, a reference, etc. - Knock yourself out")]
+#[structopt(name = "prototype", about = "This is prototype binary for emitting object files;
+ it is only meant for debugging, a reference, etc. - Knock yourself out")]
 pub struct Args {
     #[structopt(short = "l", long = "link", help = "Link the file with this name")]
     link: Option<String>,
@@ -40,10 +43,22 @@ pub struct Args {
     linkline: Vec<String>
 }
 
-fn run (args: Args) -> error::Result<()> {
+fn run (args: Args) -> Result<(), Error> {
     let file = File::create(Path::new(&args.filename))?;
-    let mut obj = ArtifactBuilder::new(Target::X86_64).name(args.filename.clone()).library(args.library).finish();
+    let mut obj = ArtifactBuilder::new(Target::X86_64)
+        .name(args.filename.clone())
+        .library(args.library)
+        .finish();
 
+    // first we declare our symbolic references;
+    // it is a runtime error to define a symbol _without_ declaring it first
+    obj.declare("deadbeef", SymbolType::Function { local: true });
+    obj.declare("main", SymbolType::Function { local: false });
+    obj.declare("str.1", SymbolType::Data { local: true });
+    obj.declare("DEADBEEF", SymbolType::DataImport);
+    obj.declare("printf", SymbolType::FunctionImport);
+
+    // we now define our local functions and data
     // 0000000000000000 <deadbeef>:
     //    0:	55                   	push   %rbp
     //    1:	48 89 e5             	mov    %rsp,%rbp
@@ -54,7 +69,7 @@ fn run (args: Args) -> error::Result<()> {
     //   10:	89 c8                	mov    %ecx,%eax
     //   12:	5d                   	pop    %rbp
     //   13:	c3                   	retq
-    obj.add_code("deadbeef",
+    obj.define("deadbeef",
         vec![0x55,
              0x48, 0x89, 0xe5,
              0x48, 0x8b, 0x05, 0x00, 0x00, 0x00, 0x00,
@@ -62,7 +77,7 @@ fn run (args: Args) -> error::Result<()> {
              0x83, 0xc1, 0x01,
              0x89, 0xc8,
              0x5d,
-             0xc3]);
+             0xc3])?;
     // main:
     // 55	push   %rbp
     // 48 89 e5	mov    %rsp,%rbp
@@ -75,7 +90,7 @@ fn run (args: Args) -> error::Result<()> {
     // b8 00 00 00 00	mov    $0x0,%eax
     // 5d	pop    %rbp
     // c3	retq
-    obj.add_code("main",
+    obj.define("main",
         vec![0x55,
              0x48, 0x89, 0xe5,
              0xb8, 0x00, 0x00, 0x00, 0x00,
@@ -86,15 +101,17 @@ fn run (args: Args) -> error::Result<()> {
              0xe8, 0x00, 0x00, 0x00, 0x00,
              0xb8, 0x00, 0x00, 0x00, 0x00,
              0x5d,
-             0xc3]);
-    obj.add_data("str.1", b"deadbeef: 0x%x\n\0".to_vec());
-    // relocations are relative to the symbol
-    obj.link(Link { from: "main", to: "str.1", at: 19 });
-    obj.import("printf", ImportKind::Function);
-    obj.import("DEADBEEF", ImportKind::Data);
-    obj.link_import(Link { from: "main", to: "printf", at: 29 });
-    obj.link_import(Link { from: "main", to: "deadbeef", at: 10 });
-    obj.link_import(Link { from: "deadbeef", to: "DEADBEEF", at: 7 });
+             0xc3])?;
+    obj.define("str.1", b"deadbeef: 0x%x\n\0".to_vec())?;
+
+    // Next, we declare our relocations,
+    // which are _always_ relative to the `from` symbol
+    obj.link2(Link { from: "main", to: "str.1", at: 19 })?;
+    obj.link2(Link { from: "main", to: "printf", at: 29 })?;
+    obj.link2(Link { from: "main", to: "deadbeef", at: 10 })?;
+    obj.link2(Link { from: "deadbeef", to: "DEADBEEF", at: 7 })?;
+
+    // Finally, we write which object file we desire
     if args.mach {
         obj.write::<Mach>(file)?;
     } else {
@@ -107,7 +124,7 @@ fn run (args: Args) -> error::Result<()> {
     Ok(())
 }
 
-fn link(name: &str, output: &str, linkline: &[String]) -> error::Result<()> {
+fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
     //ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
     let child = Command::new("ld")
                         .args(&["-e", "_start",

@@ -1,3 +1,6 @@
+use ordermap::OrderMap;
+use failure::Error;
+
 use std::io::{Write};
 use std::fs::{File};
 
@@ -7,6 +10,40 @@ use Code;
 use Data;
 
 pub type Relocation = (String, String, usize);
+
+#[derive(Fail, Debug)]
+pub enum ArtifactError {
+    #[fail(display = "Undeclared symbolic reference to: {}", _0)]
+    Undeclared (String),
+    #[fail(display = "Attempt to define an undefined import: {}", _0)]
+    ImportDefined(String)
+}
+
+// FIXME: choose better name, def something shorter, perhaps Decl
+#[derive(Debug)]
+pub enum SymbolType {
+    FunctionImport,
+    DataImport,
+    Function { local: bool },
+    Data { local: bool },
+}
+
+impl SymbolType {
+    pub fn is_import(&self) -> bool {
+        use SymbolType::*;
+        match *self {
+            FunctionImport => true,
+            DataImport => true,
+            _ => false,
+        }
+    }
+}
+
+/// FIXME: temporary structure used by link2
+pub struct LinkDecl<'a> {
+    pub from_type: &'a SymbolType,
+    pub to_type: &'a SymbolType,
+}
 
 /// An abstract relocation linking one symbol to another, at an offset
 pub struct Link<'a> {
@@ -69,6 +106,7 @@ pub struct Artifact {
     imports: Vec<(String, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
+    declarations: OrderMap<String, SymbolType>,
 }
 
 // api completely subject to change
@@ -84,6 +122,7 @@ impl Artifact {
             name: name.unwrap_or("goblin".to_owned()),
             target,
             is_library: false,
+            declarations: OrderMap::new(),
         }
     }
     /// Get this artifacts code vector
@@ -102,25 +141,94 @@ impl Artifact {
     pub fn links(&self) -> &[(Relocation)] {
         &self.links
     }
+    // FIXME: rename to links after return value determined
+    pub fn links2<'a>(&'a self) -> Box<Iterator<Item = (Link<'a>, LinkDecl<'a>)> + 'a> {
+        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at)| {
+            // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
+            // ensure it has a declaration
+            let (ref from_type, ref to_type) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
+            (Link { from, to, at: *at }, LinkDecl { from_type, to_type })
+        }))
+    }
+    // FIXME: consider removing
     /// Get this artifacts import relocations
     pub fn import_links(&self) -> &[(Relocation)] {
         &self.import_links
     }
+    // FIXME: deprecated/remove
     /// Add a new function with `name`, whose body is in `code`
     pub fn add_code<T: AsRef<str>>(&mut self, name: T, code: Code) {
+        if !self.declarations.contains_key(name.as_ref()) {
+            panic!("Declaration not found for {}", name.as_ref());
+        }
         self.code.push((name.as_ref().to_string(), code));
     }
+    // FIXME: deprecated/remove
     /// Add a byte blob of non-function data
     pub fn add_data<T: AsRef<str>>(&mut self, name: T, data: Data) {
+        if !self.declarations.contains_key(name.as_ref()) {
+            panic!("Declaration not found for {}", name.as_ref());
+        }
         self.data.push((name.as_ref().to_string(), data));
     }
+    pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
+        let decl_name = name.as_ref().to_string();
+        match self.declarations.get(&decl_name) {
+            Some(ref stype) => {
+                let definition = (decl_name, data);
+                match *stype {
+                    &SymbolType::Data { .. } => self.data.push(definition),
+                    &SymbolType::Function { .. } => self.code.push(definition),
+                    _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
+                    _ => unimplemented!("New SymbolType variant added but not covered in define method"),
+                }
+            },
+            None => {
+                return Err(ArtifactError::Undeclared(decl_name))
+            }
+        }
+        Ok(())
+    }
+    /// Declare a new symbolic reference, with the given `kind`.
+    /// **Note**: All declarations _must_ precede their definitions.
+    pub fn declare<T: AsRef<str>>(&mut self, name: T, kind: SymbolType) {
+        let decl_name = name.as_ref().to_string();
+        match kind {
+            SymbolType::DataImport => self.imports.push((decl_name.clone(), ImportKind::Data)),
+            SymbolType::FunctionImport => self.imports.push((decl_name.clone(), ImportKind::Function)),
+            _ => ()
+        }
+        self.declarations.insert(decl_name, kind);
+    }
+    // FIXME: have this add the decl as well
     /// Create a new function import, to be used subsequently in [link_import](struct.Artifact.method#link_import.html)
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) {
         self.imports.push((import.as_ref().to_string(), kind));
     }
+    // FIXME: DEPRECATED/remove
     /// Link a new relocation at offset `Link.at` into the caller at `Link.from`, for the import at `Link.to`
     pub fn link_import<'a>(&mut self, link: Link<'a>) {
         self.import_links.push((link.from.to_string(), link.to.to_string(), link.at));
+    }
+    /// FIXME: add docs, replace link with this
+    pub fn link2<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
+        match (self.declarations.get(link.from), self.declarations.get(link.to)) {
+            (Some(ref _from_type), Some(ref to_type)) => {
+                let link = (link.from.to_string(), link.to.to_string(), link.at);
+                if to_type.is_import() {
+                    self.import_links.push(link);
+                } else {
+                    self.links.push(link);
+                }
+            },
+            (None, _) => {
+                return Err(ArtifactError::Undeclared(link.from.to_string()).into());
+            },
+            (_, None) => {
+                return Err(ArtifactError::Undeclared(link.to.to_string()).into());
+            }
+        }
+        Ok(())
     }
     /// Link a relocation into `object` at `offset`, referring to `reference` (currently, this will be a simple data object, like a string you previously added via add_data)
     pub fn link<'a>(&mut self, link: Link<'a>) {
