@@ -24,6 +24,9 @@ use std::process::Command;
 #[structopt(name = "prototype", about = "This is prototype binary for emitting object files;
  it is only meant for debugging, a reference, etc. - Knock yourself out")]
 pub struct Args {
+    #[structopt(long = "deadbeef", help = "Generate deadbeef object file to link against main program")]
+    deadbeef: bool,
+
     #[structopt(short = "l", long = "link", help = "Link the file with this name")]
     link: Option<String>,
 
@@ -33,7 +36,7 @@ pub struct Args {
     #[structopt(long = "mach", help = "Output mach file")]
     mach: bool,
 
-    #[structopt(long = "library", help = "Output a static library")]
+    #[structopt(long = "library", help = "Output a static library (Unimplemented)")]
     library: bool,
 
     #[structopt(help = "The filename to output")]
@@ -124,6 +127,30 @@ fn run (args: Args) -> Result<(), Error> {
     Ok(())
 }
 
+fn deadbeef (args: Args) -> Result<(), Error> {
+    let file = File::create(Path::new(&args.filename))?;
+    let mut obj = ArtifactBuilder::new(Target::X86_64)
+        .name(args.filename.clone())
+        .library(args.library)
+        .finish();
+
+    // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
+    // gold complains though:
+    // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
+    obj.declare("DEADBEEF", SymbolType::Data { local: false });
+    obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
+    if args.mach {
+        obj.write::<Mach>(file)?;
+    } else {
+        obj.write::<Elf>(file)?;
+        println!("res: {:#?}", obj);
+    }
+    if let Some(output) = args.link {
+        link(&args.filename, &output, &args.linkline)?;
+    }
+    Ok(())
+}
+
 fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
     //ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
     let child = Command::new("cc")
@@ -141,7 +168,8 @@ fn main () {
     let args = Args::from_args();
     if args.debug { ::env::set_var("RUST_LOG", "faerie=debug"); };
     env_logger::init().unwrap();
-    match run(args) {
+    let res = if args.deadbeef { deadbeef(args) } else { run(args) };
+    match res {
         Ok(()) => (),
         Err(err) => println!("{:#}", err)
     }
