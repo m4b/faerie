@@ -15,7 +15,9 @@ pub enum ArtifactError {
     #[fail(display = "Undeclared symbolic reference to: {}", _0)]
     Undeclared (String),
     #[fail(display = "Attempt to define an undefined import: {}", _0)]
-    ImportDefined(String)
+    ImportDefined(String),
+    #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
+    RelocateImport(String),
 }
 
 #[derive(Debug)]
@@ -118,12 +120,12 @@ pub struct Artifact {
     pub name: String,
     pub target: Target,
     pub is_library: bool,
+    // will keep this for now; may be useful to pre-partition code and data vectors, not sure
     code: Vec<(String, Code)>,
     data: Vec<(String, Data)>,
     imports: Vec<(String, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
-    all_links: Vec<Relocation>,
     declarations: OrderMap<String, SymbolType>,
     definitions: Vec<(String, Data, Prop)>,
 }
@@ -137,7 +139,6 @@ impl Artifact {
             data: Vec::new(),
             imports: Vec::new(),
             import_links: Vec::new(),
-            all_links: Vec::new(),
             links: Vec::new(),
             name: name.unwrap_or("goblin".to_owned()),
             target,
@@ -146,21 +147,9 @@ impl Artifact {
             definitions: Vec::new(),
         }
     }
-    /// Get this artifacts code vector
-    pub fn code(&self) -> &[(String, Code)] {
-        &self.code
-    }
-    /// Get this artifacts data vector
-    pub fn data(&self) -> &[(String, Data)] {
-        &self.data
-    }
     /// Get this artifacts import vector
     pub fn imports(&self) -> &[(String, ImportKind)] {
         &self.imports
-    }
-    /// Get this artifacts relocations
-    pub fn links(&self) -> &[(Relocation)] {
-        &self.links
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
         Box::new(self.definitions.iter().map(move |&(ref name, ref data, ref prop)| {
@@ -171,9 +160,9 @@ impl Artifact {
             }
         }))
     }
-    // FIXME: rename to links after return value determined
-    pub(crate) fn all_links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
-        Box::new(self.all_links.iter().map(move |&(ref from, ref to, ref at)| {
+    /// Get this artifacts relocations
+    pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
+        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at)| {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
             let (ref from_type, ref to_type) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
@@ -184,27 +173,9 @@ impl Artifact {
             }
         }))
     }
-    // FIXME: deprecated/remove
-    /// Get this artifacts import relocations
-    pub fn import_links(&self) -> &[(Relocation)] {
-        &self.import_links
-    }
-    // FIXME: deprecated/remove
-    /// Add a new function with `name`, whose body is in `code`
-    pub fn add_code<T: AsRef<str>>(&mut self, name: T, code: Code) {
-        if !self.declarations.contains_key(name.as_ref()) {
-            panic!("Declaration not found for {}", name.as_ref());
-        }
-        self.code.push((name.as_ref().to_string(), code));
-    }
-    // FIXME: deprecated/remove
-    /// Add a byte blob of non-function data
-    pub fn add_data<T: AsRef<str>>(&mut self, name: T, data: Data) {
-        if !self.declarations.contains_key(name.as_ref()) {
-            panic!("Declaration not found for {}", name.as_ref());
-        }
-        self.data.push((name.as_ref().to_string(), data));
-    }
+    /// Defines a _previously declared_ program object.
+    /// **NB**: If you attempt to define an import, this will return an error.
+    /// If you attempt to define something which has not been declared, this will return an error.
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
         let decl_name = name.as_ref().to_string();
         match self.declarations.get(&decl_name) {
@@ -240,24 +211,17 @@ impl Artifact {
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) {
         self.imports.push((import.as_ref().to_string(), kind));
     }
-    // FIXME: DEPRECATED/remove
-    /// Link a new relocation at offset `Link.at` into the caller at `Link.from`, for the import at `Link.to`
-    pub fn link_import<'a>(&mut self, link: Link<'a>) {
-        self.import_links.push((link.from.to_string(), link.to.to_string(), link.at));
-    }
-    /// FIXME: add docs, replace link with this
-    /// FIXME: return an error when the user tries to create a link from an import to anything else
-    pub fn link2<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
+    /// Link a relocation at `link.at` from `link.from` to `link.to`
+    /// **NB**: If either `link.from` or `link.to` is undeclared, then this will return an error.
+    /// If `link.from` is an import you previously declared, this will also return an error.
+    pub fn link<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
         match (self.declarations.get(link.from), self.declarations.get(link.to)) {
-            (Some(ref _from_type), Some(ref to_type)) => {
-                let link = (link.from.to_string(), link.to.to_string(), link.at);
-                self.all_links.push(link.clone());
-                // FIXME: remove this once transition is complete
-                if to_type.is_import() {
-                    self.import_links.push(link);
-                } else {
-                    self.links.push(link);
+            (Some(ref from_type), Some(_)) => {
+                if from_type.is_import() {
+                    return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
                 }
+                let link = (link.from.to_string(), link.to.to_string(), link.at);
+                self.links.push(link.clone());
             },
             (None, _) => {
                 return Err(ArtifactError::Undeclared(link.from.to_string()).into());
@@ -267,10 +231,6 @@ impl Artifact {
             }
         }
         Ok(())
-    }
-    /// Link a relocation into `object` at `offset`, referring to `reference` (currently, this will be a simple data object, like a string you previously added via add_data)
-    pub fn link<'a>(&mut self, link: Link<'a>) {
-        self.links.push((link.from.to_string(), link.to.to_string(), link.at));
     }
     /// Emit a blob of bytes that represents this object file
     pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {

@@ -625,7 +625,7 @@ impl<'a> Object for Elf<'a> {
         for &(ref import, ref kind) in artifact.imports() {
             elf.import(import.to_string(), kind);
         }
-        for link in artifact.all_links() {
+        for link in artifact.links() {
             elf.link(link.from.name, link.to.name, link.at, link.to.kind);
         }
         let mut buffer = Cursor::new(Vec::new());

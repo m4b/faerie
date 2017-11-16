@@ -538,7 +538,7 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_GOT_LOAD};
     let mut text_relocations = Vec::new();
     debug!("Generating relocations");
-    for link in artifact.all_links() {
+    for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.kind);
         let reloc = match link.to.kind {
             &artifact::SymbolType::Function {..} => X86_64_RELOC_BRANCH,
