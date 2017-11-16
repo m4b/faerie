@@ -1,5 +1,5 @@
 use {Artifact, Target, Object, Ctx};
-use artifact::Definition;
+use artifact::{self, Definition};
 
 use failure::Error;
 use ordermap::OrderMap;
@@ -535,30 +535,24 @@ impl<'a> Mach<'a> {
 }
 
 fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
-    use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED};
+    use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_GOT_LOAD};
     let mut text_relocations = Vec::new();
     debug!("Generating relocations");
-    for &(ref from, ref to, offset) in artifact.import_links() {
-        debug!("Import links for: from {} to {} at {:#x}", from, to, offset);
-        match (symtab.offset(from), symtab.index(to)) {
+    for link in artifact.all_links() {
+        debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.kind);
+        let reloc = match link.to.kind {
+            &artifact::SymbolType::Function {..} => X86_64_RELOC_BRANCH,
+            &artifact::SymbolType::Data {..} => X86_64_RELOC_SIGNED,
+            &artifact::SymbolType::FunctionImport => X86_64_RELOC_BRANCH,
+            &artifact::SymbolType::DataImport => X86_64_RELOC_GOT_LOAD,
+        };
+        match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
             (Some(base_offset), Some(to_symbol_index)) => {
-                debug!("{} offset: {}", to, base_offset + offset);
-                let reloc = RelocationBuilder::new(to_symbol_index, base_offset + offset, X86_64_RELOC_BRANCH).create();
+                debug!("{} offset: {}", link.to.name, base_offset + link.at);
+                let reloc = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc).create();
                 text_relocations.push(reloc);
             },
-            _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", from, to, offset, symtab)
-        }
-    }
-    // FIXME: this inherited the bad behavior from elf link of switching from/to
-    for &(ref to, ref from, offset) in artifact.links() {
-        debug!("Data links for: from {} to {} at {:#x}", from, to, offset);
-        match (symtab.index(from), symtab.offset(to)) {
-            (Some(from_symbol_index), Some(base_offset)) => {
-                debug!("{} offset: {}", from, base_offset + offset);
-                let reloc = RelocationBuilder::new(from_symbol_index, base_offset + offset, X86_64_RELOC_SIGNED).create();
-                text_relocations.push(reloc);
-            },
-            _ => error!("Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", from, to, offset, symtab)
+            _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
         }
     }
     vec![text_relocations]

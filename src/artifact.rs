@@ -246,6 +246,7 @@ impl Artifact {
         self.import_links.push((link.from.to_string(), link.to.to_string(), link.at));
     }
     /// FIXME: add docs, replace link with this
+    /// FIXME: return an error when the user tries to create a link from an import to anything else
     pub fn link2<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
         match (self.declarations.get(link.from), self.declarations.get(link.to)) {
             (Some(ref _from_type), Some(ref to_type)) => {
