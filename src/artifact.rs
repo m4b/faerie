@@ -4,7 +4,6 @@ use failure::Error;
 use std::io::{Write};
 use std::fs::{File};
 
-use error;
 use Target;
 use Code;
 use Data;
@@ -17,6 +16,11 @@ pub enum ArtifactError {
     Undeclared (String),
     #[fail(display = "Attempt to define an undefined import: {}", _0)]
     ImportDefined(String)
+}
+
+pub struct Prop {
+    pub local: bool,
+    pub function: bool,
 }
 
 // FIXME: choose better name, def something shorter, perhaps Decl
@@ -39,10 +43,21 @@ impl SymbolType {
     }
 }
 
-/// FIXME: temporary structure used by link2
-pub struct LinkDecl<'a> {
-    pub from_type: &'a SymbolType,
-    pub to_type: &'a SymbolType,
+pub(crate) struct Binding<'a> {
+    pub name: &'a str,
+    pub kind: &'a SymbolType,
+}
+
+pub(crate) struct LinkAndDecl<'a> {
+    pub from: Binding<'a>,
+    pub to: Binding<'a>,
+    pub at: usize,
+}
+
+pub(crate) struct DefWithProp<'a> {
+    pub name: &'a str,
+    pub data: &'a [u8],
+    pub prop: Prop,
 }
 
 /// An abstract relocation linking one symbol to another, at an offset
@@ -106,6 +121,7 @@ pub struct Artifact {
     imports: Vec<(String, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
+    all_links: Vec<Relocation>,
     declarations: OrderMap<String, SymbolType>,
 }
 
@@ -118,6 +134,7 @@ impl Artifact {
             data: Vec::new(),
             imports: Vec::new(),
             import_links: Vec::new(),
+            all_links: Vec::new(),
             links: Vec::new(),
             name: name.unwrap_or("goblin".to_owned()),
             target,
@@ -141,16 +158,37 @@ impl Artifact {
     pub fn links(&self) -> &[(Relocation)] {
         &self.links
     }
+    pub(crate) fn code2<'a>(&'a self) -> Box<Iterator<Item = DefWithProp<'a>> + 'a> {
+        Box::new(self.code.iter().map(move |&(ref name, ref data)| {
+            // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
+            // ensure it has a declaration
+            let kind = self.declarations.get(name).unwrap();
+            let prop = match *kind {
+                SymbolType::Data { local } => Prop { function: false, local },
+                SymbolType::Function { local } => Prop { function: true, local },
+                _ => unreachable!()
+            };
+            DefWithProp {
+                name,
+                prop,
+                data
+            }
+        }))
+    }
     // FIXME: rename to links after return value determined
-    pub fn links2<'a>(&'a self) -> Box<Iterator<Item = (Link<'a>, LinkDecl<'a>)> + 'a> {
-        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at)| {
+    pub(crate) fn all_links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
+        Box::new(self.all_links.iter().map(move |&(ref from, ref to, ref at)| {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
             let (ref from_type, ref to_type) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
-            (Link { from, to, at: *at }, LinkDecl { from_type, to_type })
+            LinkAndDecl {
+                from: Binding { name: from, kind: from_type},
+                to: Binding { name: to, kind: to_type},
+                at: *at,
+            }
         }))
     }
-    // FIXME: consider removing
+    // FIXME: deprecated/remove
     /// Get this artifacts import relocations
     pub fn import_links(&self) -> &[(Relocation)] {
         &self.import_links
@@ -198,6 +236,7 @@ impl Artifact {
             SymbolType::FunctionImport => self.imports.push((decl_name.clone(), ImportKind::Function)),
             _ => ()
         }
+        // FIXME: error out when there's a duplicate declaration
         self.declarations.insert(decl_name, kind);
     }
     // FIXME: have this add the decl as well
@@ -215,6 +254,7 @@ impl Artifact {
         match (self.declarations.get(link.from), self.declarations.get(link.to)) {
             (Some(ref _from_type), Some(ref to_type)) => {
                 let link = (link.from.to_string(), link.to.to_string(), link.at);
+                self.all_links.push(link.clone());
                 if to_type.is_import() {
                     self.import_links.push(link);
                 } else {
@@ -235,11 +275,11 @@ impl Artifact {
         self.links.push((link.from.to_string(), link.to.to_string(), link.at));
     }
     /// Emit a blob of bytes that represents this object file
-    pub fn emit<O: Object>(&self) -> error::Result<Vec<u8>> {
+    pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {
         O::to_bytes(self)
     }
     /// Emit and write to disk a blob of bytes that represents this object file
-    pub fn write<O: Object>(&self, mut sink: File) -> error::Result<()> {
+    pub fn write<O: Object>(&self, mut sink: File) -> Result<(), Error> {
         let bytes = self.emit::<O>()?;
         sink.write_all(&bytes)?;
         Ok(())
@@ -248,5 +288,5 @@ impl Artifact {
 
 /// The interface for an object file which different binary container formats implement to marshall an artifact into a blob of bytes
 pub trait Object {
-    fn to_bytes(artifact: &Artifact) -> error::Result<Vec<u8>>;
+    fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error>;
 }

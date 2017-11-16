@@ -1,8 +1,6 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
+use {Artifact, Target, Object, Code, Data, Ctx};
 
-use {error, Artifact, Target, Object, Code, Data, Ctx};
-
+use failure::Error;
 use ordermap::OrderMap;
 use string_interner::{DefaultStringInterner};
 //use std::collections::HashMap;
@@ -218,12 +216,10 @@ impl SectionBuilder {
 
 type ArtifactCode<'a> = &'a [(String, Code)];
 type ArtifactData<'a> = &'a [(String, Data)];
-type ArtifactImports = Vec<String>;
 
 type StrTableIndex = usize;
 type StrTable = DefaultStringInterner;
 type Symbols = OrderMap<StrTableIndex, SymbolBuilder>;
-type Sections = [SectionBuilder; 2];
 type Relocations = Vec<Vec<RelocationInfo>>;
 
 /// A mach object symbol table
@@ -323,7 +319,7 @@ impl SegmentBuilder {
     pub fn load_command_size(ctx: &Ctx) -> usize {
         Segment::size_with(&ctx) + (Self::NSECTIONS * Section::size_with(&ctx))
     }
-    fn section_data_file_offset(ctx: &Ctx) -> usize {
+    fn _section_data_file_offset(ctx: &Ctx) -> usize {
         // section data
         Header::size_with(&ctx.container) + Self::load_command_size(ctx)
     }
@@ -346,7 +342,7 @@ impl SegmentBuilder {
         let mut symbol_offset = 0;
         let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX ,artifact.code());
         let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, artifact.data());
-        for &(ref import, ref kind) in artifact.imports() {
+        for &(ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
         }
         // FIXME re add assert
@@ -408,7 +404,7 @@ impl<'a> Mach<'a> {
         header.sizeofcmds = sizeofcmds as u32;
         header
     }
-    pub fn write<T: Write + Seek>(self, file: T) -> error::Result<()> {
+    pub fn write<T: Write + Seek>(self, file: T) -> Result<(), Error> {
         let mut file = BufWriter::new(file);
         // FIXME: this is ugly af, need cmdsize to get symtable offset
         // construct symtab command
@@ -552,6 +548,7 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
             _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", from, to, offset, symtab)
         }
     }
+    // FIXME: this inherited the bad behavior from elf link of switching from/to
     for &(ref to, ref from, offset) in artifact.links() {
         debug!("Data links for: from {} to {} at {:#x}", from, to, offset);
         match (symtab.index(from), symtab.offset(to)) {
@@ -567,7 +564,7 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
 }
 
 impl<'a> Object for Mach<'a> {
-    fn to_bytes(artifact: &Artifact) -> error::Result<Vec<u8>> {
+    fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
         let mach = Mach::new(&artifact);
         let mut buffer = Cursor::new(Vec::new());
         mach.write(&mut buffer)?;

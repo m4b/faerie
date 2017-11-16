@@ -126,16 +126,9 @@ fn run (args: Args) -> Result<(), Error> {
 
 fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
     //ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
-    let child = Command::new("ld")
-                        .args(&["-e", "_start",
-                                "-I", "/usr/lib/ld-linux-x86-64.so.2",
-                                "-L", "/usr/lib/",
-                                "/usr/lib/crti.o",
-                                "/usr/lib/Scrt1.o",
-                                "/usr/lib/crtn.o"])
+    let child = Command::new("cc")
                         .args(linkline)
                         .args(&[name,
-                                "-l", "c",
                                 "-o", output,
                             ])
                         .spawn()?;

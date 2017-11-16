@@ -1,5 +1,6 @@
 use goblin;
-use {error, artifact, Artifact, Object, Target, Code, Data, Ctx, ImportKind};
+use failure::Error;
+use {artifact, Artifact, Object, Target, Code, Data, Ctx, ImportKind};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -75,9 +76,9 @@ impl SymbolBuilder {
     pub fn size(mut self, size: usize) -> Self {
         self.size = size as u64; self
     }
-    /// Is this symbol global?
-    pub fn global(mut self) -> Self {
-        self.global = true; self
+    /// Is this symbol local in scope?
+    pub fn local(mut self, local: bool) -> Self {
+        self.global = !local; self
     }
     /// Set the symbol name as a byte offset into the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
@@ -375,7 +376,7 @@ impl Elf {
         self.sizeof_strtab += size;
         (idx, offset)
     }
-    pub fn add_code(&mut self, name: String, code: Code) {
+    pub fn add_code(&mut self, name: String, code: Code, kind: artifact::Prop) {
         // intern section and symbol name strings
         let (_reloc_idx, _reloc_section_offset) = self.new_string(format!(".reloc.text.{}", name));
         let (_text_idx, section_offset) = self.new_string(format!(".text.{}", name));
@@ -385,7 +386,7 @@ impl Elf {
         let size = code.len();
         debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // build symbol based on this 
-        let mut symbol = SymbolBuilder::new(SymbolType::Function).size(size).name_offset(offset).global().create();
+        let mut symbol = SymbolBuilder::new(SymbolType::Function).size(size).name_offset(offset).local(kind.local).create();
         // the symbols section reference/index will be the current number of sections
         symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create(); //.name_offset(section_offset)
@@ -406,6 +407,7 @@ impl Elf {
 
         self.code.insert(idx, code);
     }
+    // FIXME: this can be completely coalesced into above/new add_definition
     pub fn add_data(&mut self, name: String, data: Data) {
         let (_reloc_idx, _reloc_section_offset) = self.new_string(format!(".reloc.data.{}", name));
         let (_text_idx, section_offset) = self.new_string(format!(".data.{}", name));
@@ -415,7 +417,8 @@ impl Elf {
         let size = data.len();
         debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // TODO: extract this into a local function, DRY and shit
-        let mut symbol = SymbolBuilder::new(SymbolType::Object).size(size).name_offset(offset).global().create();
+        // FIXME
+        let mut symbol = SymbolBuilder::new(SymbolType::Object).size(size).name_offset(offset).local(false).create();
         symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create(); //.name_offset(section_offset)
         // the symbols section reference/index will be the current number of sections
@@ -440,44 +443,25 @@ impl Elf {
         self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
-    // FIXME/DEPRECATED - switch to just using link below
-    pub fn link_import(&mut self, caller: &str, import: &str, offset: usize) {
-        let idx = self.strings.intern(caller).unwrap();
-        let import_idx = self.strings.intern(import).unwrap();
-        let reloc = match self.imports.get(&import_idx) {
-            Some(&ImportKind::Function) => reloc::R_X86_64_PLT32,
-            Some(&ImportKind::Data) => reloc::R_X86_64_GOTPCREL,
-            // FIXME: this should be more principled (i.e., die at this point) instead of returning PLT32.
-            // currently this is required since we add `link_import` for a local deadbeef function since
-            // `link` has no way of emitting a call relocation
-            // Consequently, we will likely need to "resolve" imports when `link` is called (and remove `link_import` from artifact)
-            // but this has the side effect of requiring all code/data/imports to be called before any `link` is called
-            // which isn't that big of a deal but current version is nice in that order of operations on artifact has no effect
-            None => reloc::R_X86_64_PLT32,
+    pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &artifact::SymbolType) {
+        let (from_idx, to_idx) = {
+            let to_idx = self.strings.intern(to).unwrap();
+            let from_idx = self.strings.intern(from).unwrap();
+            let (to_idx, _, _) = self.symbols.get_pair_index(&to_idx).unwrap();
+            let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx).unwrap();
+            (from_idx, to_idx)
         };
-        let (idx, _, _) = self.symbols.get_pair_index(&idx).unwrap();
-        // FIXME: if incorrect import name in artifact.import() is given this will panic
-        let (import_idx, _, _) = self.symbols.get_pair_index(&import_idx).unwrap();
-        let mut reloc = RelocationBuilder::new(reloc).sym(import_idx + self.section_symbols.len()).offset(offset).create();
-        reloc.r_addend = -4;
-        self.add_reloc(caller, reloc, idx)
-    }
-    pub fn link(&mut self, to: &str, from: &str, offset: usize, to_type: &artifact::SymbolType) {
-        let idx = self.strings.intern(to).unwrap();
-        let from_idx = self.strings.intern(from).unwrap();
-        let (idx, _, _) = self.symbols.get_pair_index(&idx).unwrap();
-        let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx).unwrap();
-        // +2 for NOTYPE and FILE symbols
-        let (reloc, addend) = match *to_type {
+        let (reloc, addend, sym_idx) = match *to_type {
             // NB: this now forces _all_ function references, whether local or not, through the PLT
             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-            artifact::SymbolType::Function {..} => (reloc::R_X86_64_PLT32, -4),
-            artifact::SymbolType::Data {..} => (reloc::R_X86_64_PC32, 0),
-            artifact::SymbolType::FunctionImport => (reloc::R_X86_64_PLT32, -4),
-            artifact::SymbolType::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+            artifact::SymbolType::Function {..} => (reloc::R_X86_64_PLT32, -4, to_idx + 2), // +2 for NOTYPE and FILE symbols
+            artifact::SymbolType::Data {..} => (reloc::R_X86_64_PC32, 0, to_idx + 2),
+            // + section_symbols.len() because this is where the import symbols begin
+            artifact::SymbolType::FunctionImport => (reloc::R_X86_64_PLT32, -4, to_idx + self.section_symbols.len()),
+            artifact::SymbolType::DataImport => (reloc::R_X86_64_GOTPCREL, -4, to_idx + self.section_symbols.len()),
         };
-        let reloc = RelocationBuilder::new(reloc).sym(from_idx + 2).offset(offset).addend(addend).create();
-        self.add_reloc(to, reloc, idx)
+        let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(offset).addend(addend).create();
+        self.add_reloc(from, reloc, from_idx)
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize) {
         debug!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
@@ -655,23 +639,20 @@ impl Elf {
 }
 
 impl Object for Elf {
-    fn to_bytes(artifact: &Artifact) -> error::Result<Vec<u8>> {
+    fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
         let mut elf = Elf::new(Some(artifact.name.to_owned()), artifact.target.clone());
-        for &(ref name, ref code) in artifact.code() {
+        for def in artifact.code2() {
             // todo just make this a reference, since we need to copy into the vector of bytes anyway
-            elf.add_code(name.to_string(), code.clone());
+            elf.add_code(def.name.to_string(), def.data.to_vec(), def.prop);
         }
         for &(ref name, ref data) in artifact.data() {
             elf.add_data(name.to_string(), data.clone());
         }
-        for (link, types) in artifact.links2() {
-            elf.link(link.from, link.to, link.at, types.to_type);
-        }
         for &(ref import, ref kind) in artifact.imports() {
             elf.import(import.to_string(), kind);
         }
-        for &(ref caller, ref import, ref offset) in artifact.import_links() {
-            elf.link_import(caller, import, *offset);
+        for link in artifact.all_links() {
+            elf.link(link.from.name, link.to.name, link.at, link.to.kind);
         }
         let mut buffer = Cursor::new(Vec::new());
         elf.write(&mut buffer)?;
