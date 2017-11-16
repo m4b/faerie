@@ -55,6 +55,7 @@ pub(crate) struct LinkAndDecl<'a> {
     pub at: usize,
 }
 
+#[derive(Debug)]
 pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
@@ -250,6 +251,7 @@ impl Artifact {
             (Some(ref _from_type), Some(ref to_type)) => {
                 let link = (link.from.to_string(), link.to.to_string(), link.at);
                 self.all_links.push(link.clone());
+                // FIXME: remove this once transition is complete
                 if to_type.is_import() {
                     self.import_links.push(link);
                 } else {
