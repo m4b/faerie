@@ -18,6 +18,7 @@ pub enum ArtifactError {
     ImportDefined(String)
 }
 
+#[derive(Debug)]
 pub struct Prop {
     pub local: bool,
     pub function: bool,
@@ -54,10 +55,10 @@ pub(crate) struct LinkAndDecl<'a> {
     pub at: usize,
 }
 
-pub(crate) struct DefWithProp<'a> {
+pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
-    pub prop: Prop,
+    pub prop: &'a Prop,
 }
 
 /// An abstract relocation linking one symbol to another, at an offset
@@ -123,6 +124,7 @@ pub struct Artifact {
     links: Vec<Relocation>,
     all_links: Vec<Relocation>,
     declarations: OrderMap<String, SymbolType>,
+    definitions: Vec<(String, Data, Prop)>,
 }
 
 // api completely subject to change
@@ -140,6 +142,7 @@ impl Artifact {
             target,
             is_library: false,
             declarations: OrderMap::new(),
+            definitions: Vec::new(),
         }
     }
     /// Get this artifacts code vector
@@ -158,20 +161,12 @@ impl Artifact {
     pub fn links(&self) -> &[(Relocation)] {
         &self.links
     }
-    pub(crate) fn code2<'a>(&'a self) -> Box<Iterator<Item = DefWithProp<'a>> + 'a> {
-        Box::new(self.code.iter().map(move |&(ref name, ref data)| {
-            // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
-            // ensure it has a declaration
-            let kind = self.declarations.get(name).unwrap();
-            let prop = match *kind {
-                SymbolType::Data { local } => Prop { function: false, local },
-                SymbolType::Function { local } => Prop { function: true, local },
-                _ => unreachable!()
-            };
-            DefWithProp {
+    pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
+        Box::new(self.definitions.iter().map(move |&(ref name, ref data, ref prop)| {
+            Definition {
                 name,
+                data,
                 prop,
-                data
             }
         }))
     }
@@ -213,13 +208,13 @@ impl Artifact {
         let decl_name = name.as_ref().to_string();
         match self.declarations.get(&decl_name) {
             Some(ref stype) => {
-                let definition = (decl_name, data);
-                match *stype {
-                    &SymbolType::Data { .. } => self.data.push(definition),
-                    &SymbolType::Function { .. } => self.code.push(definition),
+                let prop = match *stype {
+                    &SymbolType::Data { local } => Prop { local, function: false },
+                    &SymbolType::Function { local } => Prop { local, function: true },
                     _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New SymbolType variant added but not covered in define method"),
-                }
+                };
+                self.definitions.push((decl_name, data, prop));
             },
             None => {
                 return Err(ArtifactError::Undeclared(decl_name))
@@ -239,7 +234,7 @@ impl Artifact {
         // FIXME: error out when there's a duplicate declaration
         self.declarations.insert(decl_name, kind);
     }
-    // FIXME: have this add the decl as well
+    // FIXME: have this be sugar and add the decl as well
     /// Create a new function import, to be used subsequently in [link_import](struct.Artifact.method#link_import.html)
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) {
         self.imports.push((import.as_ref().to_string(), kind));

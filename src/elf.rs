@@ -1,6 +1,6 @@
 use goblin;
 use failure::Error;
-use {artifact, Artifact, Object, Target, Code, Data, Ctx, ImportKind};
+use {artifact, Artifact, Object, Target, Ctx, ImportKind};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -280,10 +280,9 @@ impl RelocationBuilder {
 
 //#[derive(Debug)]
 /// An intermediate ELF object file container
-pub struct Elf {
+pub struct Elf<'a> {
     name: String,
-    code: OrderMap<StringIndex, Code>,
-    data: OrderMap<StringIndex, Data>,
+    code: OrderMap<StringIndex, &'a [u8]>,
     relocations: OrderMap<StringIndex, (Section, Vec<Relocation>)>,
     symbols: OrderMap<StringIndex, Symbol>,
     section_symbols: OrderMap<StringIndex, Symbol>,
@@ -298,11 +297,10 @@ pub struct Elf {
     target: Target,
 }
 
-impl fmt::Debug for Elf {
+impl<'a> fmt::Debug for Elf<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         writeln!(fmt, "{}", self.name)?;
         writeln!(fmt, "{:?}", self.code)?;
-        writeln!(fmt, "{:?}", self.        data)?;
         writeln!(fmt, "{:#?}", self.        relocations)?;
         writeln!(fmt, "{:#?}", self.        symbols)?;
         writeln!(fmt, "{:?}", self.        imports)?;
@@ -319,7 +317,7 @@ impl fmt::Debug for Elf {
 const STRTAB_LINK: u16 = 1;
 const SYMTAB_LINK: u16 = 2;
 
-impl Elf {
+impl<'a> Elf<'a> {
     pub fn new(name: Option<String>, target: Target) -> Self {
         let ctx = Ctx::from(target.clone());
         let name = name.unwrap_or("goblin".to_owned());
@@ -353,7 +351,6 @@ impl Elf {
         Elf {
             name,
             code:        OrderMap::new(),
-            data:        OrderMap::new(),
             relocations: OrderMap::new(),
             imports:     HashMap::new(),
             symbols:     OrderMap::new(),
@@ -376,66 +373,57 @@ impl Elf {
         self.sizeof_strtab += size;
         (idx, offset)
     }
-    pub fn add_code(&mut self, name: String, code: Code, kind: artifact::Prop) {
+    pub fn add_definition(&mut self, name: &str, data: &'a [u8], prop: &artifact::Prop) {
+        // FIXME: this is kind of hacky?
+        let segment_name =
+          if prop.function { "text" } else {
+              // we'd add ro here once the prop supports that
+              "data"
+          };
         // intern section and symbol name strings
-        let (_reloc_idx, _reloc_section_offset) = self.new_string(format!(".reloc.text.{}", name));
-        let (_text_idx, section_offset) = self.new_string(format!(".text.{}", name));
+        let (_reloc_idx, _reloc_section_offset) = self.new_string(format!(".reloc.{}.{}", segment_name, name));
+        let (_text_idx, section_offset) = self.new_string(format!(".{}.{}", segment_name, name));
         // can do prefix optimization here actually, because .text.*
-        let (idx, offset) = self.new_string(name);
+        let (idx, offset) = self.new_string(name.to_string());
         // store the size of this code
-        let size = code.len();
+        let size = data.len();
         debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
-        // build symbol based on this 
-        let mut symbol = SymbolBuilder::new(SymbolType::Function).size(size).name_offset(offset).local(kind.local).create();
+        // build symbol based on this _and_ the properties of the definition
+        let mut symbol = SymbolBuilder::new(if prop.function { SymbolType::Function } else { SymbolType::Object })
+            .size(size)
+            .name_offset(offset)
+            .local(prop.local)
+            .create();
         // the symbols section reference/index will be the current number of sections
         symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
-        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create(); //.name_offset(section_offset)
+
+        // now we build the section a la LLVM "function sections"
+        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
         // the symbols section reference/index will be the current number of sections
         section_symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
         self.section_symbols.insert(idx, section_symbol);
         // FIXME: probably add padding alignment
-        // create a PROGBITS section based on these code bytes
-        let mut section = SectionBuilder::new(size as u64).name_offset(section_offset).section_type(SectionType::Bits).alloc().exec().create(&self.ctx);
+        let mut section = {
+            let tmp = SectionBuilder::new(size as u64)
+                .name_offset(section_offset)
+                .section_type(if prop.function { SectionType::Bits } else { SectionType::String })
+                .alloc();
+            // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
+            if prop.function { tmp.exec().create(&self.ctx) } else { tmp.create(&self.ctx) }
+        };
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
+        // NB this is very brittle
+        // - it means the entry is a sequence of 1 byte each, i.e., a cstring
+        if !prop.function { section.sh_entsize = 1 };
         self.sections.insert(idx, section);
         self.nsections += 1;
         // increment the size
         self.sizeof_bits += size;
 
-        self.code.insert(idx, code);
-    }
-    // FIXME: this can be completely coalesced into above/new add_definition
-    pub fn add_data(&mut self, name: String, data: Data) {
-        let (_reloc_idx, _reloc_section_offset) = self.new_string(format!(".reloc.data.{}", name));
-        let (_text_idx, section_offset) = self.new_string(format!(".data.{}", name));
-        let (idx, offset) = self.new_string(name);
-
-        // we add +4 because using -4 addend for all PC32 relocs for now because ihavenoideawhatimdoing
-        let size = data.len();
-        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
-        // TODO: extract this into a local function, DRY and shit
-        // FIXME
-        let mut symbol = SymbolBuilder::new(SymbolType::Object).size(size).name_offset(offset).local(false).create();
-        symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
-        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create(); //.name_offset(section_offset)
-        // the symbols section reference/index will be the current number of sections
-        section_symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
-        // insert it into our symbol table
-        self.symbols.insert(idx, symbol);
-        self.section_symbols.insert(idx, section_symbol);
-
-        let mut section = SectionBuilder::new(size as u64).name_offset(section_offset).section_type(SectionType::String).alloc().create(&self.ctx);
-        // the offset is the head of how many program bits we've added
-        section.sh_offset = self.sizeof_bits as u64;
-        section.sh_entsize = 1;
-        self.sections.insert(idx, section);
-        self.nsections += 1;
-        self.sizeof_bits += size;
-
-        self.data.insert(idx, data);
+        self.code.insert(idx, data);
     }
     pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
@@ -519,21 +507,11 @@ impl Elf {
         // Code
         /////////////////////////////////////
 
-        for (_idx, function) in self.code.drain(..) {
-            file.write(function.as_slice())?;
+        for (_idx, bytes) in self.code.drain(..) {
+            file.write(bytes)?;
         }
         let after_code = file.seek(Current(0))?;
         debug!("after_code {:#x}, expect: {:#x} - {}", after_code, strtab_offset, after_code == strtab_offset);
-
-        /////////////////////////////////////
-        // Data
-        /////////////////////////////////////
-
-        for (_idx, data) in self.data.drain(..) {
-            file.write(data.as_slice())?;
-        }
-        let after_data = file.seek(Current(0))?;
-        debug!("after_data {:#x}, expect: {:#x} - {}", after_data, strtab_offset, after_data == strtab_offset);
 
         /////////////////////////////////////
         // Init sections
@@ -638,15 +616,11 @@ impl Elf {
     }
 }
 
-impl Object for Elf {
+impl<'a> Object for Elf<'a> {
     fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
         let mut elf = Elf::new(Some(artifact.name.to_owned()), artifact.target.clone());
-        for def in artifact.code2() {
-            // todo just make this a reference, since we need to copy into the vector of bytes anyway
-            elf.add_code(def.name.to_string(), def.data.to_vec(), def.prop);
-        }
-        for &(ref name, ref data) in artifact.data() {
-            elf.add_data(name.to_string(), data.clone());
+        for def in artifact.definitions() {
+            elf.add_definition(def.name, def.data, def.prop);
         }
         for &(ref import, ref kind) in artifact.imports() {
             elf.import(import.to_string(), kind);
