@@ -328,7 +328,7 @@ impl SegmentBuilder {
         let mut local_size = 0;
         for def in definitions {
             local_size += def.data.len();
-            symtab.insert(def.name, SymbolType::Defined { section, offset: *symbol_offset, global: !def.prop.local });
+            symtab.insert(def.name, SymbolType::Defined { section, offset: *symbol_offset, global: def.prop.global });
             *symbol_offset += def.data.len();
         }
         let section = SectionBuilder::new(sectname, segname, local_size).offset(*offset).addr(*addr);

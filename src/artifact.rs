@@ -3,6 +3,7 @@ use failure::Error;
 
 use std::io::{Write};
 use std::fs::{File};
+use std::collections::BTreeSet;
 
 use Target;
 use Code;
@@ -20,11 +21,34 @@ pub enum ArtifactError {
     RelocateImport(String),
 }
 
-#[derive(Debug)]
+///////////////////////////////////////////////
+// NOTE:
+// Good citizen, you are hereby forewarned:
+//
+// Do not change the ordering of any fields in Prop or InternalDefinition
+// because:
+// 1. BTreeSet depends on it
+// 2. Backends (e.g. ELF) rely on it to receive the definitions as locals first, etc.
+//
+// If it is changed, it must obey the invariant that:
+//   iteration via `definitions()` returns _local_ (i.e., non global) definitions first
+//   (the ordering of properties thereafter is not specified nor currently relevant)
+//   _and then_ global definitions
+///////////////////////////////////////////////
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Prop {
-    pub local: bool,
+    pub global: bool,
     pub function: bool,
 }
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct InternalDefinition {
+    prop: Prop,
+    name: String, // this will (eventually) be a string index from interner
+    data: Data,
+}
+// end note
+///////////////////////////////////////////////
 
 // FIXME: choose better name, def something shorter, perhaps Decl
 #[derive(Debug)]
@@ -62,6 +86,16 @@ pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
     pub prop: &'a Prop,
+}
+
+impl<'a> From<&'a InternalDefinition> for Definition<'a> {
+    fn from(def: &'a InternalDefinition) -> Self {
+        Definition {
+            name: &def.name,
+            data: &def.data,
+            prop: &def.prop,
+        }
+    }
 }
 
 /// An abstract relocation linking one symbol to another, at an offset
@@ -127,7 +161,7 @@ pub struct Artifact {
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
     declarations: OrderMap<String, SymbolType>,
-    definitions: Vec<(String, Data, Prop)>,
+    definitions: BTreeSet<InternalDefinition>,
 }
 
 // api completely subject to change
@@ -144,7 +178,7 @@ impl Artifact {
             target,
             is_library: false,
             declarations: OrderMap::new(),
-            definitions: Vec::new(),
+            definitions: BTreeSet::new(),
         }
     }
     /// Get this artifacts import vector
@@ -152,13 +186,7 @@ impl Artifact {
         &self.imports
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
-        Box::new(self.definitions.iter().map(move |&(ref name, ref data, ref prop)| {
-            Definition {
-                name,
-                data,
-                prop,
-            }
-        }))
+        Box::new(self.definitions.iter().map(Definition::from))
     }
     /// Get this artifacts relocations
     pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
@@ -181,12 +209,12 @@ impl Artifact {
         match self.declarations.get(&decl_name) {
             Some(ref stype) => {
                 let prop = match *stype {
-                    &SymbolType::Data { local } => Prop { local, function: false },
-                    &SymbolType::Function { local } => Prop { local, function: true },
+                    &SymbolType::Data { local } => Prop { global: !local, function: false },
+                    &SymbolType::Function { local } => Prop { global: !local, function: true },
                     _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New SymbolType variant added but not covered in define method"),
                 };
-                self.definitions.push((decl_name, data, prop));
+                self.definitions.insert(InternalDefinition { name: decl_name, data, prop });
             },
             None => {
                 return Err(ArtifactError::Undeclared(decl_name))

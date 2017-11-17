@@ -295,6 +295,7 @@ pub struct Elf<'a> {
     nsections: u16,
     ctx: Ctx,
     target: Target,
+    nlocals: usize,
 }
 
 impl<'a> fmt::Debug for Elf<'a> {
@@ -363,6 +364,7 @@ impl<'a> Elf<'a> {
             sizeof_bits,
             ctx,
             target,
+            nlocals: 0,
         }
     }
     fn new_string(&mut self, name: String) -> (StringIndex, usize) {
@@ -374,6 +376,8 @@ impl<'a> Elf<'a> {
         (idx, offset)
     }
     pub fn add_definition(&mut self, name: &str, data: &'a [u8], prop: &artifact::Prop) {
+        // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
+        if !prop.global { self.nlocals += 1; }
         // FIXME: this is kind of hacky?
         let segment_name =
           if prop.function { "text" } else {
@@ -392,7 +396,7 @@ impl<'a> Elf<'a> {
         let mut symbol = SymbolBuilder::new(if prop.function { SymbolType::Function } else { SymbolType::Object })
             .size(size)
             .name_offset(offset)
-            .local(prop.local)
+            .local(!prop.global)
             .create();
         // the symbols section reference/index will be the current number of sections
         symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
@@ -531,8 +535,9 @@ impl<'a> Elf<'a> {
         };
         symtab.sh_offset = symtab_offset;
         symtab.sh_link = 1; // we link to our strtab above
-        // FunFact: symtab.sh_info acts as a delimiter pointing to which are the "external" functions in the object file; if this isn't correct, it will segfault linkers or cause them to _sometimes_ emit garbage, ymmv
-        symtab.sh_info = self.section_symbols.len() as u32;
+        // FunFact: symtab.sh_info acts as a delimiter pointing to which are the "external" functions in the object file;
+        // if this isn't correct, it will segfault linkers or cause them to _sometimes_ emit garbage, ymmv
+        symtab.sh_info = (self.section_symbols.len() + self.nlocals) as u32;
         section_headers.push(symtab);
 
         /////////////////////////////////////
