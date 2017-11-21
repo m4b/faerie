@@ -23,5 +23,5 @@ ordermap = "0.2.10"
 structopt = "0.1.0"
 structopt-derive = "0.1.0"
 string-interner = "0.6.3"
-failure = {git = "https://github.com/withoutboats/failure"}
-failure_derive = { git = "https://github.com/withoutboats/derive-fail"}
+failure = "0.1.0"
+failure_derive = "0.1.0"
