@@ -1,3 +1,5 @@
+//! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
+
 use {Artifact, Target, Object, Ctx};
 use artifact::{Decl, Definition};
 

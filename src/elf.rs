@@ -1,3 +1,5 @@
+//! The ELF32/64 bit backend for transforming an artifact to a valid, ELF object file.
+
 use goblin;
 use failure::Error;
 use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind};

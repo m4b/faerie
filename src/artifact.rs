@@ -1,3 +1,5 @@
+//! An artifact is a platform independent binary object file format abstraction.
+
 use ordermap::OrderMap;
 use failure::Error;
 
@@ -7,8 +9,9 @@ use std::collections::BTreeSet;
 
 use {Target, Data};
 
-pub type Relocation = (String, String, usize);
+type Relocation = (String, String, usize);
 
+/// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
 pub enum ArtifactError {
     #[fail(display = "Undeclared symbolic reference to: {}", _0)]
@@ -35,6 +38,7 @@ pub enum ArtifactError {
 //   (the ordering of properties thereafter is not specified nor currently relevant)
 //   _and then_ global definitions
 ///////////////////////////////////////////////
+/// The properties associated with a symbolic reference
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Prop {
     pub global: bool,
@@ -53,13 +57,18 @@ struct InternalDefinition {
 /// The kind of declaration this is
 #[derive(Debug, Copy, Clone)]
 pub enum Decl {
+    /// An import of a function/routine defined in a shared library
     FunctionImport,
+    /// A GOT-based import of data defined in a shared library
     DataImport,
-    Function { local: bool },
-    Data { local: bool },
+    /// A function defined in this artifact
+    Function { global: bool },
+    /// An data object defined in this artifact
+    Data { global: bool },
 }
 
 impl Decl {
+    /// Is this an import (function or data) from a shared library?
     pub fn is_import(&self) -> bool {
         use Decl::*;
         match *self {
@@ -154,8 +163,11 @@ impl ArtifactBuilder {
 #[derive(Debug)]
 /// An abstract binary artifact, which contains code, data, imports, and relocations
 pub struct Artifact {
+    /// The name of this artifact
     pub name: String,
+    /// The machine target this is intended for
     pub target: Target,
+    /// Whether this is a static library or not
     pub is_library: bool,
     // will keep this for now; may be useful to pre-partition code and data vectors, not sure
     code: Vec<(String, Data)>,
@@ -235,8 +247,8 @@ impl Artifact {
         match self.declarations.get(&decl_name) {
             Some(ref stype) => {
                 let prop = match *stype {
-                    &Decl::Data { local } => Prop { global: !local, function: false },
-                    &Decl::Function { local } => Prop { global: !local, function: true },
+                    &Decl::Data { global } => Prop { global, function: false },
+                    &Decl::Function { global } => Prop { global, function: true },
                     _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
@@ -248,10 +260,12 @@ impl Artifact {
         }
         Ok(())
     }
-    // FIXME: have this be sugar and add the decl as well
-    /// Create a new function import, to be used subsequently in [link_import](struct.Artifact.method#link_import.html)
-    pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) {
+    /// Declare `import` to be an import with `kind`.
+    /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
+    pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
+        self.declare(import.as_ref(), match &kind { &ImportKind::Function => Decl::FunctionImport, &ImportKind::Data => Decl::DataImport})?;
         self.imports.push((import.as_ref().to_string(), kind));
+        Ok(())
     }
     /// Link a relocation at `link.at` from `link.from` to `link.to`
     /// **NB**: If either `link.from` or `link.to` is undeclared, then this will return an error.

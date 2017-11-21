@@ -13,6 +13,8 @@ use goblin::container;
 pub use goblin::error as error;
 
 type Ctx = container::Ctx;
+
+/// A blob of binary bytes
 pub type Data = Vec<u8>;
 
 mod target;

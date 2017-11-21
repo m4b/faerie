@@ -60,9 +60,9 @@ fn run (args: Args) -> Result<(), Error> {
     // it is a runtime error to define a symbol _without_ declaring it first
     obj.declarations(
         [
-            ("deadbeef", Decl::Function { local: true }),
-            ("main",     Decl::Function { local: false }),
-            ("str.1",    Decl::Data { local: true }),
+            ("deadbeef", Decl::Function { global: false }),
+            ("main",     Decl::Function { global: true }),
+            ("str.1",    Decl::Data { global: false }),
             ("DEADBEEF", Decl::DataImport),
             ("printf",   Decl::FunctionImport),
         ].into_iter().cloned()
@@ -144,7 +144,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
     // gold complains though:
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
-    obj.declare("DEADBEEF", Decl::Data { local: false })?;
+    obj.declare("DEADBEEF", Decl::Data { global: true })?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
     if args.mach {
         obj.write::<Mach>(file)?;

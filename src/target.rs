@@ -3,6 +3,7 @@
 use container;
 use Ctx;
 
+/// A machine architecture target
 #[derive(Debug, Copy, Clone)]
 pub enum Target {
     X86_64,
