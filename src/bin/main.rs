@@ -8,7 +8,7 @@ extern crate failure;
 use structopt::StructOpt;
 use failure::Error;
 
-use faerie::{Link, Elf, Mach, Target, ArtifactBuilder, SymbolType};
+use faerie::{Link, Elf, Mach, Target, ArtifactBuilder, Decl};
 use std::path::Path;
 use std::fs::File;
 use std::env;
@@ -20,6 +20,9 @@ use std::process::Command;
 // ELF try this for dynamically linked file
 // ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
 
+// example to run
+// ./prototype --deadbeef deadbeef.o
+// ./prototype --link test test.o deadbeef.o
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "prototype", about = "This is prototype binary for emitting object files;
  it is only meant for debugging, a reference, etc. - Knock yourself out")]
@@ -55,11 +58,15 @@ fn run (args: Args) -> Result<(), Error> {
 
     // first we declare our symbolic references;
     // it is a runtime error to define a symbol _without_ declaring it first
-    obj.declare("deadbeef", SymbolType::Function { local: true });
-    obj.declare("main", SymbolType::Function { local: false });
-    obj.declare("str.1", SymbolType::Data { local: true });
-    obj.declare("DEADBEEF", SymbolType::DataImport);
-    obj.declare("printf", SymbolType::FunctionImport);
+    obj.declarations(
+        [
+            ("deadbeef", Decl::Function { local: true }),
+            ("main",     Decl::Function { local: false }),
+            ("str.1",    Decl::Data { local: true }),
+            ("DEADBEEF", Decl::DataImport),
+            ("printf",   Decl::FunctionImport),
+        ].into_iter().cloned()
+    )?;
 
     // we now define our local functions and data
     // 0000000000000000 <deadbeef>:
@@ -137,7 +144,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
     // gold complains though:
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
-    obj.declare("DEADBEEF", SymbolType::Data { local: false });
+    obj.declare("DEADBEEF", Decl::Data { local: false })?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
     if args.mach {
         obj.write::<Mach>(file)?;

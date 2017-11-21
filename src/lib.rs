@@ -13,7 +13,6 @@ use goblin::container;
 pub use goblin::error as error;
 
 type Ctx = container::Ctx;
-pub type Code = Vec<u8>;
 pub type Data = Vec<u8>;
 
 mod target;
@@ -26,7 +25,7 @@ pub mod mach;
 pub use mach::Mach;
 
 pub mod artifact;
-pub use artifact::{Object, Artifact, ArtifactBuilder, Link, ImportKind, SymbolType};
+pub use artifact::{Object, Artifact, ArtifactBuilder, Link, ImportKind, Decl};
 
 #[cfg(test)]
 mod tests {

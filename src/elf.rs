@@ -1,6 +1,6 @@
 use goblin;
 use failure::Error;
-use {artifact, Artifact, Object, Target, Ctx, ImportKind};
+use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -435,7 +435,7 @@ impl<'a> Elf<'a> {
         self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
-    pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &artifact::SymbolType) {
+    pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &Decl) {
         let (from_idx, to_idx) = {
             let to_idx = self.strings.intern(to).unwrap();
             let from_idx = self.strings.intern(from).unwrap();
@@ -446,11 +446,11 @@ impl<'a> Elf<'a> {
         let (reloc, addend, sym_idx) = match *to_type {
             // NB: this now forces _all_ function references, whether local or not, through the PLT
             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-            artifact::SymbolType::Function {..} => (reloc::R_X86_64_PLT32, -4, to_idx + 2), // +2 for NOTYPE and FILE symbols
-            artifact::SymbolType::Data {..} => (reloc::R_X86_64_PC32, 0, to_idx + 2),
+            Decl::Function {..} => (reloc::R_X86_64_PLT32, -4, to_idx + 2), // +2 for NOTYPE and FILE symbols
+            Decl::Data {..} => (reloc::R_X86_64_PC32, 0, to_idx + 2),
             // + section_symbols.len() because this is where the import symbols begin
-            artifact::SymbolType::FunctionImport => (reloc::R_X86_64_PLT32, -4, to_idx + self.section_symbols.len()),
-            artifact::SymbolType::DataImport => (reloc::R_X86_64_GOTPCREL, -4, to_idx + self.section_symbols.len()),
+            Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4, to_idx + self.section_symbols.len()),
+            Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4, to_idx + self.section_symbols.len()),
         };
         let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(offset).addend(addend).create();
         self.add_reloc(from, reloc, from_idx)
@@ -631,7 +631,7 @@ impl<'a> Object for Elf<'a> {
             elf.import(import.to_string(), kind);
         }
         for link in artifact.links() {
-            elf.link(link.from.name, link.to.name, link.at, link.to.kind);
+            elf.link(link.from.name, link.to.name, link.at, link.to.decl);
         }
         let mut buffer = Cursor::new(Vec::new());
         elf.write(&mut buffer)?;

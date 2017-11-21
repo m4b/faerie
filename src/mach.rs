@@ -1,5 +1,5 @@
 use {Artifact, Target, Object, Ctx};
-use artifact::{self, Definition};
+use artifact::{Decl, Definition};
 
 use failure::Error;
 use ordermap::OrderMap;
@@ -539,12 +539,12 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     let mut text_relocations = Vec::new();
     debug!("Generating relocations");
     for link in artifact.links() {
-        debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.kind);
-        let reloc = match link.to.kind {
-            &artifact::SymbolType::Function {..} => X86_64_RELOC_BRANCH,
-            &artifact::SymbolType::Data {..} => X86_64_RELOC_SIGNED,
-            &artifact::SymbolType::FunctionImport => X86_64_RELOC_BRANCH,
-            &artifact::SymbolType::DataImport => X86_64_RELOC_GOT_LOAD,
+        debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.decl);
+        let reloc = match link.to.decl {
+            &Decl::Function {..} => X86_64_RELOC_BRANCH,
+            &Decl::Data {..} => X86_64_RELOC_SIGNED,
+            &Decl::FunctionImport => X86_64_RELOC_BRANCH,
+            &Decl::DataImport => X86_64_RELOC_GOT_LOAD,
         };
         match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
             (Some(base_offset), Some(to_symbol_index)) => {

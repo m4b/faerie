@@ -5,9 +5,7 @@ use std::io::{Write};
 use std::fs::{File};
 use std::collections::BTreeSet;
 
-use Target;
-use Code;
-use Data;
+use {Target, Data};
 
 pub type Relocation = (String, String, usize);
 
@@ -19,6 +17,8 @@ pub enum ArtifactError {
     ImportDefined(String),
     #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
     RelocateImport(String),
+    #[fail(display = "Duplicate declaration: {}", _0)]
+    DuplicateDeclaration(String),
 }
 
 ///////////////////////////////////////////////
@@ -50,18 +50,18 @@ struct InternalDefinition {
 // end note
 ///////////////////////////////////////////////
 
-// FIXME: choose better name, def something shorter, perhaps Decl
-#[derive(Debug)]
-pub enum SymbolType {
+/// The kind of declaration this is
+#[derive(Debug, Copy, Clone)]
+pub enum Decl {
     FunctionImport,
     DataImport,
     Function { local: bool },
     Data { local: bool },
 }
 
-impl SymbolType {
+impl Decl {
     pub fn is_import(&self) -> bool {
-        use SymbolType::*;
+        use Decl::*;
         match *self {
             FunctionImport => true,
             DataImport => true,
@@ -70,17 +70,20 @@ impl SymbolType {
     }
 }
 
+/// A binding of a raw `name` to its declaration, `decl`
 pub(crate) struct Binding<'a> {
     pub name: &'a str,
-    pub kind: &'a SymbolType,
+    pub decl: &'a Decl,
 }
 
+/// A relocation binding one declaration to another
 pub(crate) struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
     pub at: usize,
 }
 
+/// A definition of a symbol with its properties the various backends receive
 #[derive(Debug)]
 pub(crate) struct Definition<'a> {
     pub name: &'a str,
@@ -155,16 +158,16 @@ pub struct Artifact {
     pub target: Target,
     pub is_library: bool,
     // will keep this for now; may be useful to pre-partition code and data vectors, not sure
-    code: Vec<(String, Code)>,
+    code: Vec<(String, Data)>,
     data: Vec<(String, Data)>,
     imports: Vec<(String, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
-    declarations: OrderMap<String, SymbolType>,
+    declarations: OrderMap<String, Decl>,
     definitions: BTreeSet<InternalDefinition>,
 }
 
-// api completely subject to change
+// api less subject to change
 impl Artifact {
     /// Create a new binary Artifact, with `target` and optional `name`
     pub fn new(target: Target, name: Option<String>) -> Self {
@@ -193,13 +196,36 @@ impl Artifact {
         Box::new(self.links.iter().map(move |&(ref from, ref to, ref at)| {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
-            let (ref from_type, ref to_type) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
+            let (ref from_decl, ref to_decl) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
             LinkAndDecl {
-                from: Binding { name: from, kind: from_type},
-                to: Binding { name: to, kind: to_type},
+                from: Binding { name: from, decl: from_decl},
+                to: Binding { name: to, decl: to_decl},
                 at: *at,
             }
         }))
+    }
+    /// Declare a new symbolic reference, with the given `kind`.
+    /// **Note**: All declarations _must_ precede their definitions.
+    pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
+        let decl_name = name.as_ref().to_string();
+        match decl {
+            Decl::DataImport => self.imports.push((decl_name.clone(), ImportKind::Data)),
+            Decl::FunctionImport => self.imports.push((decl_name.clone(), ImportKind::Function)),
+            _ => ()
+        }
+        match self.declarations.insert(decl_name, decl) {
+            Some(_) => {
+                Err(ArtifactError::DuplicateDeclaration(name.as_ref().to_string()).into())
+            },
+            None => Ok(())
+        }
+    }
+    /// [Declare](struct.Artifact.html#method.declare) a sequence of name, [Decl](enum.Decl.html) pairs
+    pub fn declarations<T: AsRef<str>, D: Iterator<Item = (T, Decl)>>(&mut self, declarations: D) -> Result<(), Error> {
+        for (name, decl) in declarations {
+            self.declare(name, decl)?;
+        }
+        Ok(())
     }
     /// Defines a _previously declared_ program object.
     /// **NB**: If you attempt to define an import, this will return an error.
@@ -209,10 +235,10 @@ impl Artifact {
         match self.declarations.get(&decl_name) {
             Some(ref stype) => {
                 let prop = match *stype {
-                    &SymbolType::Data { local } => Prop { global: !local, function: false },
-                    &SymbolType::Function { local } => Prop { global: !local, function: true },
+                    &Decl::Data { local } => Prop { global: !local, function: false },
+                    &Decl::Function { local } => Prop { global: !local, function: true },
                     _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
-                    _ => unimplemented!("New SymbolType variant added but not covered in define method"),
+                    _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
                 self.definitions.insert(InternalDefinition { name: decl_name, data, prop });
             },
@@ -221,18 +247,6 @@ impl Artifact {
             }
         }
         Ok(())
-    }
-    /// Declare a new symbolic reference, with the given `kind`.
-    /// **Note**: All declarations _must_ precede their definitions.
-    pub fn declare<T: AsRef<str>>(&mut self, name: T, kind: SymbolType) {
-        let decl_name = name.as_ref().to_string();
-        match kind {
-            SymbolType::DataImport => self.imports.push((decl_name.clone(), ImportKind::Data)),
-            SymbolType::FunctionImport => self.imports.push((decl_name.clone(), ImportKind::Function)),
-            _ => ()
-        }
-        // FIXME: error out when there's a duplicate declaration
-        self.declarations.insert(decl_name, kind);
     }
     // FIXME: have this be sugar and add the decl as well
     /// Create a new function import, to be used subsequently in [link_import](struct.Artifact.method#link_import.html)
