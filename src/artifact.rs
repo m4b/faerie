@@ -220,16 +220,23 @@ impl Artifact {
     /// **Note**: All declarations _must_ precede their definitions.
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
         let decl_name = name.as_ref().to_string();
-        match decl {
-            Decl::DataImport => self.imports.push((decl_name.clone(), ImportKind::Data)),
-            Decl::FunctionImport => self.imports.push((decl_name.clone(), ImportKind::Function)),
-            _ => ()
-        }
-        match self.declarations.insert(decl_name, decl) {
+        match self.declarations.insert(decl_name.clone(), decl) {
             Some(_) => {
-                Err(ArtifactError::DuplicateDeclaration(name.as_ref().to_string()).into())
+                match decl {
+                    // ref https://github.com/m4b/faerie/issues/18
+                    Decl::DataImport |
+                    Decl::FunctionImport => Ok(()),
+                    _ => Err(ArtifactError::DuplicateDeclaration(decl_name).into())
+                }
             },
-            None => Ok(())
+            None => {
+                match decl {
+                    Decl::DataImport => { self.imports.push((decl_name, ImportKind::Data)); Ok(()) }
+                    Decl::FunctionImport => { self.imports.push((decl_name, ImportKind::Function)); Ok(()) }
+                    _ => Ok(())
+                }
+
+            }
         }
     }
     /// [Declare](struct.Artifact.html#method.declare) a sequence of name, [Decl](enum.Decl.html) pairs
