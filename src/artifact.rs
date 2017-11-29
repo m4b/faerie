@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use {Target, Data};
 
-type Relocation = (String, String, usize);
+type Relocation = (String, String, usize, Option<u32>);
 
 /// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
@@ -90,6 +90,7 @@ pub(crate) struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
     pub at: usize,
+    pub reloc: Option<u32>,
 }
 
 /// A definition of a symbol with its properties the various backends receive
@@ -118,6 +119,8 @@ pub struct Link<'a> {
     pub to: &'a str,
     /// The byte offset _relative_ to `from` where the relocation should be performed
     pub at: usize,
+    /// Relocation type:
+    pub reloc: Option<u32>,
 }
 
 /// The kind of import this is - either a function, or a copy relocation of data from a shared library
@@ -205,7 +208,7 @@ impl Artifact {
     }
     /// Get this artifacts relocations
     pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
-        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at)| {
+        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at, ref reloc)| {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
             let (ref from_decl, ref to_decl) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
@@ -213,6 +216,7 @@ impl Artifact {
                 from: Binding { name: from, decl: from_decl},
                 to: Binding { name: to, decl: to_decl},
                 at: *at,
+                reloc: *reloc,
             }
         }))
     }
@@ -283,7 +287,7 @@ impl Artifact {
                 if from_type.is_import() {
                     return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
                 }
-                let link = (link.from.to_string(), link.to.to_string(), link.at);
+                let link = (link.from.to_string(), link.to.to_string(), link.at, link.reloc);
                 self.links.push(link.clone());
             },
             (None, _) => {

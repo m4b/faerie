@@ -116,10 +116,10 @@ fn run (args: Args) -> Result<(), Error> {
 
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
-    obj.link(Link { from: "main", to: "str.1", at: 19 })?;
-    obj.link(Link { from: "main", to: "printf", at: 29 })?;
-    obj.link(Link { from: "main", to: "deadbeef", at: 10 })?;
-    obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 7 })?;
+    obj.link(Link { from: "main", to: "str.1", at: 19, reloc: None })?;
+    obj.link(Link { from: "main", to: "printf", at: 29, reloc: None })?;
+    obj.link(Link { from: "main", to: "deadbeef", at: 10, reloc: None })?;
+    obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 7, reloc: None })?;
 
     // Finally, we write which object file we desire
     if args.mach {
