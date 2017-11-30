@@ -2,7 +2,7 @@
 
 use goblin;
 use failure::Error;
-use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind};
+use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind, RelocOverride};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -437,7 +437,7 @@ impl<'a> Elf<'a> {
         self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
-    pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &Decl, reloctype: Option<u32>) {
+    pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &Decl, reloctype: Option<RelocOverride>) {
         let (from_idx, to_idx) = {
             let to_idx = self.strings.intern(to).unwrap();
             let from_idx = self.strings.intern(from).unwrap();
@@ -446,16 +446,26 @@ impl<'a> Elf<'a> {
             (from_idx, to_idx)
         };
 
-        let overridable = { |r| if let Some(o) = reloctype { o } else { r } };
-        let (reloc, addend, sym_idx) = match *to_type {
-            // NB: this now forces _all_ function references, whether local or not, through the PLT
-            // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-            Decl::Function {..} => (overridable(reloc::R_X86_64_PLT32), -4, to_idx + 2), // +2 for NOTYPE and FILE symbols
-            Decl::Data {..} => (overridable(reloc::R_X86_64_PC32), 0, to_idx + 2),
-            // + section_symbols.len() because this is where the import symbols begin
-            Decl::FunctionImport => (overridable(reloc::R_X86_64_PLT32), -4, to_idx + self.section_symbols.len()),
-            Decl::DataImport => (overridable(reloc::R_X86_64_GOTPCREL), -4, to_idx + self.section_symbols.len()),
+        let (reloc, addend) = if let Some(ovr) = reloctype {
+            (ovr.elftype, ovr.addend as isize)
+        } else {
+            match *to_type {
+                // NB: this now forces _all_ function references, whether local or not, through the PLT
+                // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
+                Decl::Function {..} => (reloc::R_X86_64_PLT32, -4),
+                Decl::Data {..} => (reloc::R_X86_64_PC32, 0),
+                Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
+                Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+            }
         };
+
+        let sym_idx = match *to_type {
+            Decl::Function {..} | Decl::Data {..} => to_idx + 2,
+            // +2 for NOTYPE and FILE symbols
+            Decl::FunctionImport | Decl::DataImport => to_idx + self.section_symbols.len(),
+            // + section_symbols.len() because this is where the import symbols begin
+        };
+
         let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(offset).addend(addend).create();
         self.add_reloc(from, reloc, from_idx)
     }

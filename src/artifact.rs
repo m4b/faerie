@@ -9,7 +9,13 @@ use std::collections::BTreeSet;
 
 use {Target, Data};
 
-type Relocation = (String, String, usize, Option<u32>);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+pub struct RelocOverride {
+    pub elftype: u32,
+    pub addend: u32,
+}
+
+type Relocation = (String, String, usize, Option<RelocOverride>);
 
 /// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
@@ -90,7 +96,7 @@ pub(crate) struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
     pub at: usize,
-    pub reloc: Option<u32>,
+    pub reloc: Option<RelocOverride>,
 }
 
 /// A definition of a symbol with its properties the various backends receive
@@ -120,7 +126,7 @@ pub struct Link<'a> {
     /// The byte offset _relative_ to `from` where the relocation should be performed
     pub at: usize,
     /// Relocation type:
-    pub reloc: Option<u32>,
+    pub reloc: Option<RelocOverride>,
 }
 
 /// The kind of import this is - either a function, or a copy relocation of data from a shared library
