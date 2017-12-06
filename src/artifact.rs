@@ -125,8 +125,6 @@ pub struct Link<'a> {
     pub to: &'a str,
     /// The byte offset _relative_ to `from` where the relocation should be performed
     pub at: usize,
-    /// Relocation type:
-    pub reloc: Option<RelocOverride>,
 }
 
 /// The kind of import this is - either a function, or a copy relocation of data from a shared library
@@ -288,12 +286,22 @@ impl Artifact {
     /// **NB**: If either `link.from` or `link.to` is undeclared, then this will return an error.
     /// If `link.from` is an import you previously declared, this will also return an error.
     pub fn link<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
+        self.link_aux(link, None)
+    }
+    /// A variant of `link` with a RelocOverride provided. Has all of the same invariants as
+    /// `link`.
+    pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: RelocOverride) -> Result<(), Error> {
+        self.link_aux(link, Some(reloc))
+    }
+
+    /// Shared implementation of `link` and `link_with`.
+    fn link_aux<'a>(&mut self, link: Link<'a>, reloc: Option<RelocOverride>) -> Result<(), Error> {
         match (self.declarations.get(link.from), self.declarations.get(link.to)) {
             (Some(ref from_type), Some(_)) => {
                 if from_type.is_import() {
                     return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
                 }
-                let link = (link.from.to_string(), link.to.to_string(), link.at, link.reloc);
+                let link = (link.from.to_string(), link.to.to_string(), link.at, reloc);
                 self.links.push(link.clone());
             },
             (None, _) => {
@@ -304,7 +312,9 @@ impl Artifact {
             }
         }
         Ok(())
+
     }
+
     /// Emit a blob of bytes that represents this object file
     pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {
         O::to_bytes(self)
