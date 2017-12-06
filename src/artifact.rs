@@ -9,7 +9,13 @@ use std::collections::BTreeSet;
 
 use {Target, Data};
 
-type Relocation = (String, String, usize);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+pub struct RelocOverride {
+    pub elftype: u32,
+    pub addend: u32,
+}
+
+type Relocation = (String, String, usize, Option<RelocOverride>);
 
 /// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
@@ -90,6 +96,7 @@ pub(crate) struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
     pub at: usize,
+    pub reloc: Option<RelocOverride>,
 }
 
 /// A definition of a symbol with its properties the various backends receive
@@ -205,7 +212,7 @@ impl Artifact {
     }
     /// Get this artifacts relocations
     pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
-        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at)| {
+        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at, ref reloc)| {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
             let (ref from_decl, ref to_decl) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
@@ -213,6 +220,7 @@ impl Artifact {
                 from: Binding { name: from, decl: from_decl},
                 to: Binding { name: to, decl: to_decl},
                 at: *at,
+                reloc: *reloc,
             }
         }))
     }
@@ -278,12 +286,22 @@ impl Artifact {
     /// **NB**: If either `link.from` or `link.to` is undeclared, then this will return an error.
     /// If `link.from` is an import you previously declared, this will also return an error.
     pub fn link<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
+        self.link_aux(link, None)
+    }
+    /// A variant of `link` with a RelocOverride provided. Has all of the same invariants as
+    /// `link`.
+    pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: RelocOverride) -> Result<(), Error> {
+        self.link_aux(link, Some(reloc))
+    }
+
+    /// Shared implementation of `link` and `link_with`.
+    fn link_aux<'a>(&mut self, link: Link<'a>, reloc: Option<RelocOverride>) -> Result<(), Error> {
         match (self.declarations.get(link.from), self.declarations.get(link.to)) {
             (Some(ref from_type), Some(_)) => {
                 if from_type.is_import() {
                     return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
                 }
-                let link = (link.from.to_string(), link.to.to_string(), link.at);
+                let link = (link.from.to_string(), link.to.to_string(), link.at, reloc);
                 self.links.push(link.clone());
             },
             (None, _) => {
@@ -294,7 +312,9 @@ impl Artifact {
             }
         }
         Ok(())
+
     }
+
     /// Emit a blob of bytes that represents this object file
     pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {
         O::to_bytes(self)
