@@ -545,6 +545,7 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
         let reloc = match link.to.decl {
             &Decl::Function {..} => X86_64_RELOC_BRANCH,
             &Decl::Data {..} => X86_64_RELOC_SIGNED,
+            &Decl::CString {..} => X86_64_RELOC_SIGNED,
             &Decl::FunctionImport => X86_64_RELOC_BRANCH,
             &Decl::DataImport => X86_64_RELOC_GOT_LOAD,
         };

@@ -49,6 +49,8 @@ pub enum ArtifactError {
 pub struct Prop {
     pub global: bool,
     pub function: bool,
+    pub writeable: bool,
+    pub cstring: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -69,8 +71,10 @@ pub enum Decl {
     DataImport,
     /// A function defined in this artifact
     Function { global: bool },
-    /// An data object defined in this artifact
-    Data { global: bool },
+    /// A data object defined in this artifact
+    Data { global: bool, writeable: bool },
+    /// A null-terminated string object defined in this artifact
+    CString { global: bool }
 }
 
 impl Decl {
@@ -262,8 +266,9 @@ impl Artifact {
         match self.declarations.get(&decl_name) {
             Some(ref stype) => {
                 let prop = match *stype {
-                    &Decl::Data { global } => Prop { global, function: false },
-                    &Decl::Function { global } => Prop { global, function: true },
+                    &Decl::CString { global } => Prop { global, function: false, writeable: false, cstring: true },
+                    &Decl::Data { global, writeable } => Prop { global, function: false, writeable, cstring: false },
+                    &Decl::Function { global } => Prop { global, function: true, writeable: false, cstring: false},
                     _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };

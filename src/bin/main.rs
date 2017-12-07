@@ -62,7 +62,7 @@ fn run (args: Args) -> Result<(), Error> {
         [
             ("deadbeef", Decl::Function { global: false }),
             ("main",     Decl::Function { global: true }),
-            ("str.1",    Decl::Data { global: false }),
+            ("str.1",    Decl::CString { global: false }),
             ("DEADBEEF", Decl::DataImport),
             ("printf",   Decl::FunctionImport),
         ].into_iter().cloned()
@@ -144,7 +144,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
     // gold complains though:
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
-    obj.declare("DEADBEEF", Decl::Data { global: true })?;
+    obj.declare("DEADBEEF", Decl::Data { global: true, writeable: false })?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
     if args.mach {
         obj.write::<Mach>(file)?;

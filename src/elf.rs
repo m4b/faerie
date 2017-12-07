@@ -137,6 +137,7 @@ impl SymbolBuilder {
 /// The kind of section this can be; used in [SectionBuilder](struct.SectionBuilder.html)
 pub enum SectionType {
     Bits,
+    Data,
     String,
     StrTab,
     SymTab,
@@ -174,6 +175,11 @@ impl SectionBuilder {
     pub fn alloc(mut self) -> Self {
         self.alloc = true; self
     }
+    /// Make this section writeable
+    pub fn writeable(mut self, writeable:bool) -> Self {
+        self.write = writeable; self
+    }
+
     /// Set the byte offset of this section's name in the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
         self.name_offset = name_offset; self
@@ -208,6 +214,10 @@ impl SectionBuilder {
                 shdr.sh_type = SHT_PROGBITS;
                 shdr.sh_flags |= (SHF_MERGE | SHF_STRINGS) as u64;
             },
+            SectionType::Data => {
+                shdr.sh_addralign = if self.exec { 0x10 } else if self.write { 0x8 } else { 1 };
+                shdr.sh_type = SHT_PROGBITS;
+            }
             SectionType::StrTab => {
                 shdr.sh_addralign = 0x1;
                 shdr.sh_type = SHT_STRTAB;
@@ -411,11 +421,22 @@ impl<'a> Elf<'a> {
         self.symbols.insert(idx, symbol);
         self.section_symbols.insert(idx, section_symbol);
         // FIXME: probably add padding alignment
+
         let mut section = {
+            let stype =
+                if prop.function {
+                    SectionType::Bits
+                } else if prop.cstring {
+                    SectionType::String
+                } else {
+                    SectionType::Data
+                };
+
             let tmp = SectionBuilder::new(size as u64)
                 .name_offset(section_offset)
-                .section_type(if prop.function { SectionType::Bits } else { SectionType::String })
-                .alloc();
+                .section_type(stype)
+                .alloc().writeable(prop.writeable);
+
             // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
             if prop.function { tmp.exec().create(&self.ctx) } else { tmp.create(&self.ctx) }
         };
@@ -454,13 +475,14 @@ impl<'a> Elf<'a> {
                 // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
                 Decl::Function {..} => (reloc::R_X86_64_PLT32, -4),
                 Decl::Data {..} => (reloc::R_X86_64_PC32, 0),
+                Decl::CString {..} => (reloc::R_X86_64_PC32, 0),
                 Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
                 Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
             }
         };
 
         let sym_idx = match *to_type {
-            Decl::Function {..} | Decl::Data {..} => to_idx + 2,
+            Decl::Function {..} | Decl::Data {..} | Decl::CString {..} => to_idx + 2,
             // +2 for NOTYPE and FILE symbols
             Decl::FunctionImport | Decl::DataImport => to_idx + self.section_symbols.len(),
             // + section_symbols.len() because this is where the import symbols begin
