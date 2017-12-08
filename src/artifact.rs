@@ -12,7 +12,7 @@ use {Target, Data};
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 pub struct RelocOverride {
     pub elftype: u32,
-    pub addend: u32,
+    pub addend: i32,
 }
 
 type Relocation = (String, String, usize, Option<RelocOverride>);
