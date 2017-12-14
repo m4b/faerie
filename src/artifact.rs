@@ -3,8 +3,8 @@
 use ordermap::OrderMap;
 use failure::Error;
 
-use std::io::{Write};
-use std::fs::{File};
+use std::io::Write;
+use std::fs::File;
 use std::collections::BTreeSet;
 
 use {Target, Data};
@@ -21,13 +21,13 @@ type Relocation = (String, String, usize, Option<RelocOverride>);
 #[derive(Fail, Debug)]
 pub enum ArtifactError {
     #[fail(display = "Undeclared symbolic reference to: {}", _0)]
-    Undeclared (String),
+    Undeclared(String),
     #[fail(display = "Attempt to define an undefined import: {}", _0)]
     ImportDefined(String),
     #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
     RelocateImport(String),
-    #[fail(display = "Duplicate declaration: {}", _0)]
-    DuplicateDeclaration(String),
+    #[fail(display = "Incompatible declaration: {}", _0)]
+    IncompatibleDeclaration(String),
 }
 
 ///////////////////////////////////////////////
@@ -63,7 +63,7 @@ struct InternalDefinition {
 ///////////////////////////////////////////////
 
 /// The kind of declaration this is
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Decl {
     /// An import of a function/routine defined in a shared library
     FunctionImport,
@@ -78,6 +78,47 @@ pub enum Decl {
 }
 
 impl Decl {
+    /// Is this Decl compatible with another, e.g., will two declarations with `self` and then `other`
+    /// yield an `IncompatibleDeclaration` error
+    // ref https://github.com/m4b/faerie/issues/24
+    // ref https://github.com/m4b/faerie/issues/18
+    pub fn is_compatible_with(&self, other: &Self) -> bool {
+        match self {
+            &Decl::DataImport => {
+                match other {
+                    // imports can be upgraded to any kind of data declaration
+                    &Decl::Data { .. } |
+                    &Decl::DataImport => true,
+                    _ => false,
+                }
+            }
+            &Decl::FunctionImport => {
+                match other {
+                    // imports can be upgraded to any kind of function declaration
+                    &Decl::Function { .. } |
+                    &Decl::FunctionImport => true,
+                    _ => false,
+                }
+            },
+            // a previous data declaration can only be re-declared a data import, or it must match exactly the
+            // next declaration
+            decl@&Decl::Data { .. } => {
+                match other {
+                    &Decl::DataImport => true,
+                    other => decl == other,
+                }
+            }
+            // a previous function decl can only be re-declared a function import, or it must match exactly
+            // the next declaration
+            decl@&Decl::Function { .. } => {
+                match other {
+                    &Decl::FunctionImport => true,
+                    other => decl == other,
+                }
+            },
+            decl => decl == other
+        }
+    }
     /// Is this an import (function or data) from a shared library?
     pub fn is_import(&self) -> bool {
         use Decl::*;
@@ -158,11 +199,13 @@ impl ArtifactBuilder {
     }
     /// Set this artifacts name
     pub fn name(mut self, name: String) -> Self {
-        self.name = Some(name); self
+        self.name = Some(name);
+        self
     }
     /// Set whether this will be a static library or not
     pub fn library(mut self, is_library: bool) -> Self {
-        self.library = is_library; self
+        self.library = is_library;
+        self
     }
     pub fn finish(self) -> Artifact {
         let mut artifact = Artifact::new(self.target, self.name);
@@ -232,27 +275,36 @@ impl Artifact {
     /// **Note**: All declarations _must_ precede their definitions.
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
         let decl_name = name.as_ref().to_string();
+        // FIXME: we need to upsert basically and absorb the decl according to is_compatible_with rules
+        // but this kind of stuff sucks with hashmaps + rust
         match self.declarations.insert(decl_name.clone(), decl) {
-            Some(_) => {
-                match decl {
-                    // ref https://github.com/m4b/faerie/issues/18
-                    Decl::DataImport |
-                    Decl::FunctionImport => Ok(()),
-                    _ => Err(ArtifactError::DuplicateDeclaration(decl_name).into())
+            Some(previous_decl) => {
+                if previous_decl.is_compatible_with(&decl) {
+                    Ok(())
+                } else {
+                    Err(ArtifactError::IncompatibleDeclaration(decl_name).into())
                 }
-            },
+            }
             None => {
                 match decl {
-                    Decl::DataImport => { self.imports.push((decl_name, ImportKind::Data)); Ok(()) }
-                    Decl::FunctionImport => { self.imports.push((decl_name, ImportKind::Function)); Ok(()) }
-                    _ => Ok(())
+                    Decl::DataImport => {
+                        self.imports.push((decl_name, ImportKind::Data));
+                        Ok(())
+                    }
+                    Decl::FunctionImport => {
+                        self.imports.push((decl_name, ImportKind::Function));
+                        Ok(())
+                    }
+                    _ => Ok(()),
                 }
-
             }
         }
     }
     /// [Declare](struct.Artifact.html#method.declare) a sequence of name, [Decl](enum.Decl.html) pairs
-    pub fn declarations<T: AsRef<str>, D: Iterator<Item = (T, Decl)>>(&mut self, declarations: D) -> Result<(), Error> {
+    pub fn declarations<T: AsRef<str>, D: Iterator<Item = (T, Decl)>>(
+        &mut self,
+        declarations: D,
+    ) -> Result<(), Error> {
         for (name, decl) in declarations {
             self.declare(name, decl)?;
         }
@@ -272,18 +324,26 @@ impl Artifact {
                     _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
-                self.definitions.insert(InternalDefinition { name: decl_name, data, prop });
-            },
-            None => {
-                return Err(ArtifactError::Undeclared(decl_name))
+                self.definitions.insert(InternalDefinition {
+                    name: decl_name,
+                    data,
+                    prop,
+                });
             }
+            None => return Err(ArtifactError::Undeclared(decl_name)),
         }
         Ok(())
     }
     /// Declare `import` to be an import with `kind`.
     /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
-        self.declare(import.as_ref(), match &kind { &ImportKind::Function => Decl::FunctionImport, &ImportKind::Data => Decl::DataImport})?;
+        self.declare(
+            import.as_ref(),
+            match &kind {
+                &ImportKind::Function => Decl::FunctionImport,
+                &ImportKind::Data => Decl::DataImport,
+            },
+        )?;
         self.imports.push((import.as_ref().to_string(), kind));
         Ok(())
     }
@@ -308,10 +368,10 @@ impl Artifact {
                 }
                 let link = (link.from.to_string(), link.to.to_string(), link.at, reloc);
                 self.links.push(link.clone());
-            },
+            }
             (None, _) => {
                 return Err(ArtifactError::Undeclared(link.from.to_string()).into());
-            },
+            }
             (_, None) => {
                 return Err(ArtifactError::Undeclared(link.to.to_string()).into());
             }
