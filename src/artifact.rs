@@ -26,8 +26,10 @@ pub enum ArtifactError {
     ImportDefined(String),
     #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
     RelocateImport(String),
-    #[fail(display = "Incompatible declaration: {}", _0)]
-    IncompatibleDeclaration(String),
+    // FIXME: don't use debugging prints for decl formats
+    #[fail(display = "Incompatible declarations, old declaration {:?} is incompatible with new {:?}", old, new)]
+    /// An incompatble declaration occurred, please see the [absorb](enum.Decl.html#method.absorb) method on `Decl`
+    IncompatibleDeclaration { old: Decl, new: Decl },
 }
 
 ///////////////////////////////////////////////
@@ -78,45 +80,63 @@ pub enum Decl {
 }
 
 impl Decl {
-    /// Is this Decl compatible with another, e.g., will two declarations with `self` and then `other`
-    /// yield an `IncompatibleDeclaration` error
+    /// If it is compatible, absorb the new declaration (`other`) into the old (`self`); otherwise returns an error.
+    ///
+    /// The rule here is "C-ish", but essentially:
+    ///
+    /// 1. Duplicate declarations are no-ops / ignored.
+    /// 2. **If** the previous declaration was an [FunctionImport](enum.Decl.html#variant.FunctionImport) or [DataImport](enum.Decl.html#variant.DataImport),
+    ///    **then** if the subsequent declaration is a corresponding matching [Function](enum.Decl.html#variant.Function) or [Data](enum.Decl.html#variant.Data)
+    ///    declaration, it is said to be "upgraded", and forever after is considered a declaration in need of a definition.
+    /// 3. **If** the previous declaration was a `Function` or `Data` declaration,
+    ///    **then** a subsequent corresponding `FunctionImport` or `DataImport` is a no-op.
+    /// 4. Anything else is a [IncompatibleDeclaration](enum.ArtifactError.html#variant.IncompatibleDeclaration) error!
     // ref https://github.com/m4b/faerie/issues/24
     // ref https://github.com/m4b/faerie/issues/18
-    pub fn is_compatible_with(&self, other: &Self) -> bool {
-        match self {
-            &Decl::DataImport => {
+    pub fn absorb(&mut self, other: Self) -> Result<(), Error> {
+        // FIXME: i can't think of a way offhand to not clone here, without unusual contortions
+        match self.clone() {
+            Decl::DataImport => {
                 match other {
-                    // imports can be upgraded to any kind of data declaration
-                    &Decl::Data { .. } |
-                    &Decl::DataImport => true,
-                    _ => false,
+                    // data imports can be upgraded to any kind of data declaration
+                    Decl::Data { .. } => { *self = other; Ok(()) }
+                    Decl::DataImport => Ok(()),
+                    _ => Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into()),
                 }
             }
-            &Decl::FunctionImport => {
+            Decl::FunctionImport => {
                 match other {
-                    // imports can be upgraded to any kind of function declaration
-                    &Decl::Function { .. } |
-                    &Decl::FunctionImport => true,
-                    _ => false,
+                    // function imports can be upgraded to any kind of function declaration
+                    Decl::Function { .. } => { *self = other; Ok(()) }
+                    Decl::FunctionImport => Ok(()),
+                    _ => Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into()),
                 }
             },
             // a previous data declaration can only be re-declared a data import, or it must match exactly the
             // next declaration
-            decl@&Decl::Data { .. } => {
+            decl@Decl::Data { .. } => {
                 match other {
-                    &Decl::DataImport => true,
-                    other => decl == other,
+                    Decl::DataImport => Ok(()),
+                    other => if decl == other { Ok(()) } else {
+                        Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into())
+                    }
                 }
             }
             // a previous function decl can only be re-declared a function import, or it must match exactly
             // the next declaration
-            decl@&Decl::Function { .. } => {
+            decl@Decl::Function { .. } => {
                 match other {
-                    &Decl::FunctionImport => true,
-                    other => decl == other,
+                    Decl::FunctionImport => Ok(()),
+                    other => {
+                        if decl == other { Ok(()) } else {
+                            Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into())
+                        }
+                    },
                 }
             },
-            decl => decl == other
+            decl => if decl == other { Ok(()) } else {
+                Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into())
+            }
         }
     }
     /// Is this an import (function or data) from a shared library?
@@ -275,30 +295,8 @@ impl Artifact {
     /// **Note**: All declarations _must_ precede their definitions.
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
         let decl_name = name.as_ref().to_string();
-        // FIXME: we need to upsert basically and absorb the decl according to is_compatible_with rules
-        // but this kind of stuff sucks with hashmaps + rust
-        match self.declarations.insert(decl_name.clone(), decl) {
-            Some(previous_decl) => {
-                if previous_decl.is_compatible_with(&decl) {
-                    Ok(())
-                } else {
-                    Err(ArtifactError::IncompatibleDeclaration(decl_name).into())
-                }
-            }
-            None => {
-                match decl {
-                    Decl::DataImport => {
-                        self.imports.push((decl_name, ImportKind::Data));
-                        Ok(())
-                    }
-                    Decl::FunctionImport => {
-                        self.imports.push((decl_name, ImportKind::Function));
-                        Ok(())
-                    }
-                    _ => Ok(()),
-                }
-            }
-        }
+        let previous_decl = self.declarations.entry(decl_name.clone()).or_insert(decl.clone());
+        previous_decl.absorb(decl)
     }
     /// [Declare](struct.Artifact.html#method.declare) a sequence of name, [Decl](enum.Decl.html) pairs
     pub fn declarations<T: AsRef<str>, D: Iterator<Item = (T, Decl)>>(

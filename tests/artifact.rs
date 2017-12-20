@@ -38,14 +38,12 @@ fn duplicate_declarations_are_ok() {
         }),
 
         ("f", faerie::Decl::FunctionImport),
-        // fixme: MAJOR decls don't overwrite
         ("f", faerie::Decl::Function { global: true }),
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::FunctionImport),
-        ("f", faerie::Decl::Function { global: false }),
+        ("f", faerie::Decl::Function { global: true }),
     ].into_iter()
     ).expect("multiple declarations are ok");
-    
 }
 
 #[test]
@@ -64,4 +62,18 @@ fn multiple_different_declarations_are_not_ok() {
             writeable: false,
         },
     ).is_err());
+}
+
+#[test]
+#[should_panic]
+fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite() {
+    let mut obj = Artifact::new(Target::X86_64, Some("t.o".into()));
+    obj.declarations(vec![
+        ("f", faerie::Decl::FunctionImport),
+        ("f", faerie::Decl::Function { global: true }),
+        ("f", faerie::Decl::FunctionImport),
+        ("f", faerie::Decl::FunctionImport),
+        ("f", faerie::Decl::Function { global: false }),
+    ].into_iter()
+    ).expect("multiple conflicting declarations are not ok");
 }
