@@ -87,7 +87,7 @@ fn import_declarations_fill_imports_correctly() {
         ("d", faerie::Decl::DataImport),
     ].into_iter()
     ).expect("can declare");
-    let imports = obj.imports();
+    let imports = obj.imports().collect::<Vec<_>>();
     assert_eq!(imports.len(), 2);
 }
 
@@ -102,6 +102,6 @@ fn import_declarations_work_with_redeclarations() {
         ("f", faerie::Decl::FunctionImport),
     ].into_iter()
     ).expect("can declare");
-    let imports = obj.imports();
+    let imports = obj.imports().collect::<Vec<_>>();
     assert_eq!(imports.len(), 1);
 }

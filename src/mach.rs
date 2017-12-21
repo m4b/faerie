@@ -346,7 +346,7 @@ impl SegmentBuilder {
         let mut symbol_offset = 0;
         let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code);
         let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &data);
-        for &(ref import, _) in artifact.imports() {
+        for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
         }
         // FIXME re add assert

@@ -658,7 +658,7 @@ impl<'a> Object for Elf<'a> {
             debug!("Def: {:?}", def);
             elf.add_definition(def.name, def.data, def.prop);
         }
-        for &(ref import, ref kind) in artifact.imports() {
+        for (ref import, ref kind) in artifact.imports() {
             debug!("Import: {:?} -> {:?}", import, kind);
             elf.import(import.to_string(), kind);
         }

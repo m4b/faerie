@@ -1,5 +1,6 @@
 //! An artifact is a platform independent binary object file format abstraction.
 
+use string_interner::DefaultStringInterner;
 use ordermap::OrderMap;
 use failure::Error;
 
@@ -15,7 +16,8 @@ pub struct RelocOverride {
     pub addend: i32,
 }
 
-type Relocation = (String, String, usize, Option<RelocOverride>);
+type StringID = usize;
+type Relocation = (StringID, StringID, usize, Option<RelocOverride>);
 
 /// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
@@ -58,7 +60,7 @@ pub struct Prop {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct InternalDefinition {
     prop: Prop,
-    name: String, // this will (eventually) be a string index from interner
+    name: StringID,
     data: Data,
 }
 // end note
@@ -172,10 +174,10 @@ pub(crate) struct Definition<'a> {
     pub prop: &'a Prop,
 }
 
-impl<'a> From<&'a InternalDefinition> for Definition<'a> {
-    fn from(def: &'a InternalDefinition) -> Self {
+impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
+    fn from((def, strings): (&'a InternalDefinition, &'a DefaultStringInterner)) -> Self {
         Definition {
-            name: &def.name,
+            name: strings.resolve(def.name).expect("internal definition to have name"),
             data: &def.data,
             prop: &def.prop,
         }
@@ -259,13 +261,14 @@ pub struct Artifact {
     /// Whether this is a static library or not
     pub is_library: bool,
     // will keep this for now; may be useful to pre-partition code and data vectors, not sure
-    code: Vec<(String, Data)>,
-    data: Vec<(String, Data)>,
-    imports: Vec<(String, ImportKind)>,
+    code: Vec<(StringID, Data)>,
+    data: Vec<(StringID, Data)>,
+    imports: Vec<(StringID, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
-    declarations: OrderMap<String, Decl>,
+    declarations: OrderMap<StringID, Decl>,
     definitions: BTreeSet<InternalDefinition>,
+    strings: DefaultStringInterner,
 }
 
 // api less subject to change
@@ -283,24 +286,27 @@ impl Artifact {
             is_library: false,
             declarations: OrderMap::new(),
             definitions: BTreeSet::new(),
+            strings: DefaultStringInterner::default(),
         }
     }
     /// Get this artifacts import vector
-    pub fn imports(&self) -> &[(String, ImportKind)] {
-        &self.imports
+    pub fn imports<'a>(&'a self) -> Box<Iterator<Item = (&'a str, &'a ImportKind)> + 'a> {
+        Box::new(self.imports.iter().map(move |&(id, ref kind)| (self.strings.resolve(id).unwrap(), kind)))
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
-        Box::new(self.definitions.iter().map(Definition::from))
+        Box::new(self.definitions.iter().map(move |int_def| Definition::from((int_def, &self.strings))))
     }
     /// Get this artifacts relocations
     pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
         Box::new(self.links.iter().map(move |&(ref from, ref to, ref at, ref reloc)| {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
-            let (ref from_decl, ref to_decl) = (self.declarations.get(from).unwrap(), self.declarations.get(to).unwrap());
+            let (ref from_decl, ref to_decl) = (self.declarations.get(from).expect("declaration present"), self.declarations.get(to).unwrap());
+            let from = Binding { name: self.strings.resolve(*from).expect("from link"), decl: from_decl};
+            let to = Binding { name: self.strings.resolve(*to).expect("to link"), decl: to_decl};
             LinkAndDecl {
-                from: Binding { name: from, decl: from_decl},
-                to: Binding { name: to, decl: to_decl},
+                from,
+                to,
                 at: *at,
                 reloc: *reloc,
             }
@@ -309,10 +315,10 @@ impl Artifact {
     /// Declare a new symbolic reference, with the given `kind`.
     /// **Note**: All declarations _must_ precede their definitions.
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
-        let decl_name = name.as_ref().to_string();
+        let decl_name = self.strings.get_or_intern(name.as_ref());
         let previous_was_import;
         let new_decl = {
-            let previous_decl = self.declarations.entry(decl_name.clone()).or_insert(decl.clone());
+            let previous_decl = self.declarations.entry(decl_name).or_insert(decl.clone());
             previous_was_import = previous_decl.is_import();
             previous_decl.absorb(decl)?;
             &*previous_decl
@@ -323,7 +329,7 @@ impl Artifact {
                 // FIXME: ditto fixme, below, use orderset
                 let mut present = false;
                 for &(ref name, _) in self.imports.iter() {
-                    if name == decl_name.as_str() {
+                    if *name == decl_name {
                         present = true;
                     }
                 }
@@ -339,7 +345,7 @@ impl Artifact {
                 let mut index = None;
                 // FIXME: do binary search or make imports an ordermap
                 for (i, &(ref name, _)) in self.imports.iter().enumerate() {
-                    if name == decl_name.as_str() {
+                    if *name == decl_name {
                         index = Some (i);
                     }
                 }
@@ -363,7 +369,7 @@ impl Artifact {
     /// **NB**: If you attempt to define an import, this will return an error.
     /// If you attempt to define something which has not been declared, this will return an error.
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
-        let decl_name = name.as_ref().to_string();
+        let decl_name = self.strings.get_or_intern(name.as_ref());
         match self.declarations.get(&decl_name) {
             Some(ref stype) => {
                 let prop = match *stype {
@@ -379,13 +385,14 @@ impl Artifact {
                     prop,
                 });
             }
-            None => return Err(ArtifactError::Undeclared(decl_name)),
+            None => return Err(ArtifactError::Undeclared(name.as_ref().to_string())),
         }
         Ok(())
     }
     /// Declare `import` to be an import with `kind`.
     /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
+        let import_id = self.strings.get_or_intern(import.as_ref());
         self.declare(
             import.as_ref(),
             match &kind {
@@ -393,7 +400,7 @@ impl Artifact {
                 &ImportKind::Data => Decl::DataImport,
             },
         )?;
-        self.imports.push((import.as_ref().to_string(), kind));
+        self.imports.push((import_id, kind));
         Ok(())
     }
     /// Link a relocation at `link.at` from `link.from` to `link.to`
@@ -410,13 +417,14 @@ impl Artifact {
 
     /// Shared implementation of `link` and `link_with`.
     fn link_aux<'a>(&mut self, link: Link<'a>, reloc: Option<RelocOverride>) -> Result<(), Error> {
-        match (self.declarations.get(link.from), self.declarations.get(link.to)) {
+        let (link_from, link_to) = (self.strings.get_or_intern(link.from), self.strings.get_or_intern(link.to));
+        match (self.declarations.get(&link_from), self.declarations.get(&link_to)) {
             (Some(ref from_type), Some(_)) => {
                 if from_type.is_import() {
                     return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
                 }
-                let link = (link.from.to_string(), link.to.to_string(), link.at, reloc);
-                self.links.push(link.clone());
+                let link = (link_from, link_to, link.at, reloc);
+                self.links.push(link);
             }
             (None, _) => {
                 return Err(ArtifactError::Undeclared(link.from.to_string()).into());
