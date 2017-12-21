@@ -1,6 +1,5 @@
 extern crate goblin;
 extern crate scroll;
-extern crate shawshank;
 extern crate ordermap;
 extern crate string_interner;
 #[macro_use]

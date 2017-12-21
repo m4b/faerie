@@ -17,8 +17,6 @@ goblin = "0.0.13"
 scroll = "0.8"
 log = "0.3.8"
 env_logger = "0.4.3"
-# remove this, #10
-shawshank = "0.2.3"
 ordermap = "0.2.10"
 structopt = "0.1.0"
 structopt-derive = "0.1.0"

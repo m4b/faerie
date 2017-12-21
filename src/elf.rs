@@ -9,7 +9,7 @@ use std::fmt;
 use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
 use scroll::IOwrite;
-use shawshank;
+use string_interner::DefaultStringInterner;
 use ordermap::OrderMap;
 
 use goblin::elf::header::{self, Header};
@@ -302,7 +302,7 @@ pub struct Elf<'a> {
     sections: HashMap<StringIndex, Section>,
     offsets: HashMap<StringIndex, Offset>,
     sizeof_strtab: Offset,
-    strings: shawshank::ArenaSet<String>,
+    strings: DefaultStringInterner,
     sizeof_bits: Offset,
     nsections: u16,
     ctx: Ctx,
@@ -322,7 +322,7 @@ impl<'a> fmt::Debug for Elf<'a> {
         writeln!(fmt, "SizeofStrtab: {:?}", self.        sizeof_strtab)?;
         writeln!(fmt, "SizeofBits: {:?}", self.        sizeof_bits)?;
         //writeln!(fmt, "SymtabOffset: {:?}", self.        symtab_offset)?;
-        writeln!(fmt, "Strings: {:?}", self.        strings.count())?;
+        writeln!(fmt, "Strings: {:?}", self.        strings.len())?;
         writeln!(fmt, "{:?}", self.        ctx)
     }
 }
@@ -334,7 +334,7 @@ impl<'a> Elf<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = Ctx::from(artifact.target.clone());
         let mut offsets = HashMap::new();
-        let mut strings = shawshank::string_arena_set();
+        let mut strings = DefaultStringInterner::default();
         let mut section_symbols = OrderMap::new();
         let mut sizeof_strtab = 1;
 
@@ -342,7 +342,7 @@ impl<'a> Elf<'a> {
             let mut push_strtab = |name: &str| {
                 let name = name.to_owned();
                 let size = name.len() + 1;
-                let idx = strings.intern(name).unwrap();
+                let idx = strings.get_or_intern(name);
                 let offset = sizeof_strtab;
                 offsets.insert(idx, offset);
                 sizeof_strtab += size;
@@ -381,7 +381,7 @@ impl<'a> Elf<'a> {
     fn new_string(&mut self, name: String) -> (StringIndex, usize) {
         let size = name.len() + 1;
         let offset = self.sizeof_strtab;
-        let idx = self.strings.intern(name).unwrap();
+        let idx = self.strings.get_or_intern(name);
         self.offsets.insert(idx, offset);
         self.sizeof_strtab += size;
         (idx, offset)
@@ -459,8 +459,8 @@ impl<'a> Elf<'a> {
     }
     pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &Decl, reloctype: Option<RelocOverride>) {
         let (from_idx, to_idx) = {
-            let to_idx = self.strings.intern(to).unwrap();
-            let from_idx = self.strings.intern(from).unwrap();
+            let to_idx = self.strings.get_or_intern(to);
+            let from_idx = self.strings.get_or_intern(from);
             let (to_idx, _, _) = self.symbols.get_pair_index(&to_idx).unwrap();
             let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx).unwrap();
             (from_idx, to_idx)
@@ -578,19 +578,11 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Strtab
         /////////////////////////////////////
-
-        let strtab = (0..self.strings.count()).into_iter().map(|i| {
-            let symbol = self.strings.disintern(i).unwrap();
-            let offset = self.offsets.get(&i).unwrap();
-            (*offset, symbol)
-        }).collect::<Vec<(usize, String)>>();
-        debug!("symbol {:?}", strtab);
-
         file.seek(Start(strtab_offset))?;
         file.iowrite(0u8)?; // for the null value in the strtab;
-        for (_offset, string) in strtab {
+        for (_id, string) in self.strings.iter() {
             debug!("String: {:?}", string);
-            file.write(string.as_str().as_bytes())?;
+            file.write(string.as_bytes())?;
             file.iowrite(0u8)?;
         }
         let after_strtab = file.seek(Current(0))?;
