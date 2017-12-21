@@ -458,6 +458,7 @@ impl<'a> Elf<'a> {
         self.symbols.insert(idx, symbol);
     }
     pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &Decl, reloctype: Option<RelocOverride>) {
+        debug!("Link: {:?} -> {:?} - {:?}", from, to, to_type);
         let (from_idx, to_idx) = {
             let to_idx = self.strings.get_or_intern(to);
             let from_idx = self.strings.get_or_intern(from);
@@ -654,9 +655,11 @@ impl<'a> Object for Elf<'a> {
         // this means that a call to new has a fully constructed object ready to marshal into bytes, similar to the mach backend
         let mut elf = Elf::new(&artifact);
         for def in artifact.definitions() {
+            debug!("Def: {:?}", def);
             elf.add_definition(def.name, def.data, def.prop);
         }
         for &(ref import, ref kind) in artifact.imports() {
+            debug!("Import: {:?} -> {:?}", import, kind);
             elf.import(import.to_string(), kind);
         }
         for link in artifact.links() {

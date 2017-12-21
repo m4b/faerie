@@ -77,3 +77,15 @@ fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite()
     ].into_iter()
     ).expect("multiple conflicting declarations are not ok");
 }
+
+#[test]
+fn import_declarations_fill_imports() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.declarations(vec![
+        ("f", faerie::Decl::FunctionImport),
+        ("d", faerie::Decl::DataImport),
+    ].into_iter()
+    ).expect("can declare");
+    let imports = obj.imports();
+    assert_eq!(imports.len(), 2);
+}
