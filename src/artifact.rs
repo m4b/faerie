@@ -228,7 +228,8 @@ impl ArtifactBuilder {
         self
     }
     pub fn finish(self) -> Artifact {
-        let mut artifact = Artifact::new(self.target, self.name);
+        let name = self.name.unwrap_or("faerie.o".to_owned());
+        let mut artifact = Artifact::new(self.target, name);
         artifact.is_library = self.library;
         artifact
     }
@@ -256,14 +257,14 @@ pub struct Artifact {
 // api less subject to change
 impl Artifact {
     /// Create a new binary Artifact, with `target` and optional `name`
-    pub fn new(target: Target, name: Option<String>) -> Self {
+    pub fn new(target: Target, name: String) -> Self {
         Artifact {
             code: Vec::new(),
             data: Vec::new(),
             imports: Vec::new(),
             import_links: Vec::new(),
             links: Vec::new(),
-            name: name.unwrap_or("goblin".to_owned()),
+            name,
             target,
             is_library: false,
             declarations: OrderMap::new(),

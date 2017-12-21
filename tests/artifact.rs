@@ -5,7 +5,7 @@ use faerie::*;
 #[test]
 fn duplicate_declarations_are_ok() {
 
-    let mut obj = Artifact::new(Target::X86_64, Some("t.o".into()));
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
 
     obj.declare("str.0", faerie::Decl::DataImport {}).expect(
         "initial declaration",
@@ -22,7 +22,7 @@ fn duplicate_declarations_are_ok() {
     obj.define("str.0", b"hello world\0".to_vec())
        .expect("define");
 
-    let mut obj = Artifact::new(Target::X86_64, Some("t.o".into()));
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
     obj.declarations(vec![
         ("str.0", faerie::Decl::DataImport),
         ("str.0", faerie::Decl::Data {
@@ -49,7 +49,7 @@ fn duplicate_declarations_are_ok() {
 #[test]
 fn multiple_different_declarations_are_not_ok() {
 
-    let mut obj = Artifact::new(Target::X86_64, Some("t.o".into()));
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
 
     obj.declare("f", faerie::Decl::FunctionImport {}).expect(
         "initial declaration",
@@ -67,7 +67,7 @@ fn multiple_different_declarations_are_not_ok() {
 #[test]
 #[should_panic]
 fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite() {
-    let mut obj = Artifact::new(Target::X86_64, Some("t.o".into()));
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
     obj.declarations(vec![
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::Function { global: true }),
