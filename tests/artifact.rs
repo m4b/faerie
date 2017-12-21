@@ -79,13 +79,29 @@ fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite()
 }
 
 #[test]
-fn import_declarations_fill_imports() {
+fn import_declarations_fill_imports_correctly() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
     obj.declarations(vec![
+        ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::FunctionImport),
         ("d", faerie::Decl::DataImport),
     ].into_iter()
     ).expect("can declare");
     let imports = obj.imports();
     assert_eq!(imports.len(), 2);
+}
+
+#[test]
+fn import_declarations_work_with_redeclarations() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.declarations(vec![
+        ("f", faerie::Decl::FunctionImport),
+        ("d", faerie::Decl::DataImport),
+        ("d", faerie::Decl::DataImport),
+        ("f", faerie::Decl::Function { global: true }),
+        ("f", faerie::Decl::FunctionImport),
+    ].into_iter()
+    ).expect("can declare");
+    let imports = obj.imports();
+    assert_eq!(imports.len(), 1);
 }

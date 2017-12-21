@@ -201,6 +201,20 @@ pub enum ImportKind {
     Data,
 }
 
+impl ImportKind {
+    fn from_decl(decl: &Decl) -> Option<Self> {
+        match decl {
+            &Decl::DataImport => {
+                Some (ImportKind::Data)
+            },
+            &Decl::FunctionImport => {
+                Some (ImportKind::Function)
+            },
+            _ => None
+        }
+    }
+}
+
 /// Builder for creating an artifact
 pub struct ArtifactBuilder {
     target: Target,
@@ -296,8 +310,44 @@ impl Artifact {
     /// **Note**: All declarations _must_ precede their definitions.
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
         let decl_name = name.as_ref().to_string();
-        let previous_decl = self.declarations.entry(decl_name.clone()).or_insert(decl.clone());
-        previous_decl.absorb(decl)
+        let previous_was_import;
+        let new_decl = {
+            let previous_decl = self.declarations.entry(decl_name.clone()).or_insert(decl.clone());
+            previous_was_import = previous_decl.is_import();
+            previous_decl.absorb(decl)?;
+            &*previous_decl
+        };
+        match new_decl {
+            &Decl::DataImport | &Decl::FunctionImport => {
+                // we have to check because otherwise duplicate imports cause an error
+                // FIXME: ditto fixme, below, use orderset
+                let mut present = false;
+                for &(ref name, _) in self.imports.iter() {
+                    if name == decl_name.as_str() {
+                        present = true;
+                    }
+                }
+                if !present {
+                    let kind = ImportKind::from_decl(new_decl)
+                        .expect("can convert from explicitly matched decls to importkind");
+                    self.imports.push((decl_name, kind));
+                }
+                Ok(())
+            }
+            // we have to delete it, because it was upgraded from an import :/
+            _ if previous_was_import => {
+                let mut index = None;
+                // FIXME: do binary search or make imports an ordermap
+                for (i, &(ref name, _)) in self.imports.iter().enumerate() {
+                    if name == decl_name.as_str() {
+                        index = Some (i);
+                    }
+                }
+                let _ = self.imports.swap_remove(index.expect("previous import was not in the imports array"));
+                Ok(())
+            },
+            _ => Ok(())
+        }
     }
     /// [Declare](struct.Artifact.html#method.declare) a sequence of name, [Decl](enum.Decl.html) pairs
     pub fn declarations<T: AsRef<str>, D: Iterator<Item = (T, Decl)>>(
