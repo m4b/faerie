@@ -6,3 +6,8 @@ rust:
 matrix:
   allow_failures:
     - rust: nightly
+env:
+  - RUST_BACKTRACE=1 PATH="$HOME/.cargo/bin:$PATH"
+script:
+  - cargo run -- --deadbeef deadbeef.o
+  - cargo run -- --link test test.o deadbeef.o
