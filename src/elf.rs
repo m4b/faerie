@@ -293,7 +293,7 @@ impl RelocationBuilder {
 //#[derive(Debug)]
 /// An intermediate ELF object file container
 pub struct Elf<'a> {
-    name: String,
+    name: &'a str,
     code: OrderMap<StringIndex, &'a [u8]>,
     relocations: OrderMap<StringIndex, (Section, Vec<Relocation>)>,
     symbols: OrderMap<StringIndex, Symbol>,
@@ -331,9 +331,8 @@ const STRTAB_LINK: u16 = 1;
 const SYMTAB_LINK: u16 = 2;
 
 impl<'a> Elf<'a> {
-    pub fn new(name: Option<String>, target: Target) -> Self {
+    pub fn new(name: &'a str, target: Target) -> Self {
         let ctx = Ctx::from(target.clone());
-        let name = name.unwrap_or("goblin".to_owned());
         let mut offsets = HashMap::new();
         let mut strings = shawshank::string_arena_set();
         let mut section_symbols = OrderMap::new();
@@ -659,7 +658,7 @@ impl<'a> Elf<'a> {
 
 impl<'a> Object for Elf<'a> {
     fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
-        let mut elf = Elf::new(Some(artifact.name.to_owned()), artifact.target.clone());
+        let mut elf = Elf::new(&artifact.name, artifact.target.clone());
         for def in artifact.definitions() {
             elf.add_definition(def.name, def.data, def.prop);
         }
