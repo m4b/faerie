@@ -331,8 +331,8 @@ const STRTAB_LINK: u16 = 1;
 const SYMTAB_LINK: u16 = 2;
 
 impl<'a> Elf<'a> {
-    pub fn new(name: &'a str, target: Target) -> Self {
-        let ctx = Ctx::from(target.clone());
+    pub fn new(artifact: &'a Artifact) -> Self {
+        let ctx = Ctx::from(artifact.target.clone());
         let mut offsets = HashMap::new();
         let mut strings = shawshank::string_arena_set();
         let mut section_symbols = OrderMap::new();
@@ -351,7 +351,7 @@ impl<'a> Elf<'a> {
 
             push_strtab(".strtab");
             push_strtab(".symtab");
-            let (idx, offset) = push_strtab(&name);
+            let (idx, offset) = push_strtab(&artifact.name);
             // NOTE: using 0 as the idx is a hack;
             // but we need to insert a null symbol as the first symbol, otherwise linkers explode
             section_symbols.insert(0, Symbol::default());
@@ -361,7 +361,7 @@ impl<'a> Elf<'a> {
 
         let sizeof_bits = Header::size(&ctx);
         Elf {
-            name,
+            name: &artifact.name,
             code:        OrderMap::new(),
             relocations: OrderMap::new(),
             imports:     HashMap::new(),
@@ -374,7 +374,7 @@ impl<'a> Elf<'a> {
             sizeof_strtab,
             sizeof_bits,
             ctx,
-            target,
+            target: artifact.target.clone(),
             nlocals: 0,
         }
     }
@@ -658,7 +658,9 @@ impl<'a> Elf<'a> {
 
 impl<'a> Object for Elf<'a> {
     fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
-        let mut elf = Elf::new(&artifact.name, artifact.target.clone());
+        // TODO: make new fully construct the elf object, e.g., the definitions, imports, and links don't take self
+        // this means that a call to new has a fully constructed object ready to marshal into bytes, similar to the mach backend
+        let mut elf = Elf::new(&artifact);
         for def in artifact.definitions() {
             elf.add_definition(def.name, def.data, def.prop);
         }
