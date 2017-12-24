@@ -3,7 +3,7 @@
 Emit some object files, at your leisure:
 
 ```rust
-let mut obj = Artifact::new(Target::X86_64, Some(String::from("test.o")));
+let mut obj = Artifact::new(Target::X86_64, String::from("test.o"));
 // first we declare our symbolic references;
 // it is a runtime error to define a symbol _without_ declaring it first
 obj.declarations(
