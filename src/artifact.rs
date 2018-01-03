@@ -392,7 +392,6 @@ impl Artifact {
     /// Declare `import` to be an import with `kind`.
     /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
-        let import_id = self.strings.get_or_intern(import.as_ref());
         self.declare(
             import.as_ref(),
             match &kind {
@@ -400,7 +399,6 @@ impl Artifact {
                 &ImportKind::Data => Decl::DataImport,
             },
         )?;
-        self.imports.push((import_id, kind));
         Ok(())
     }
     /// Link a relocation at `link.at` from `link.from` to `link.to`
