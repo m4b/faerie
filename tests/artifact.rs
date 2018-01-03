@@ -105,3 +105,11 @@ fn import_declarations_work_with_redeclarations() {
     let imports = obj.imports().collect::<Vec<_>>();
     assert_eq!(imports.len(), 1);
 }
+
+#[test]
+fn import_helper_adds_declaration_only_once() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.import("f", faerie::ImportKind::Function).expect("can import");
+    let imports = obj.imports().collect::<Vec<_>>();
+    assert_eq!(imports.len(), 1);
+}
