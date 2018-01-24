@@ -462,8 +462,10 @@ impl<'a> Elf<'a> {
         let (from_idx, to_idx) = {
             let to_idx = self.strings.get_or_intern(to);
             let from_idx = self.strings.get_or_intern(from);
-            let (to_idx, _, _) = self.symbols.get_pair_index(&to_idx).unwrap();
-            let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx).unwrap();
+            let (to_idx, _, _) = self.symbols.get_pair_index(&to_idx)
+                .expect(&format!("link could not find symbol pair for \"{}\" at to_idx {}", to, to_idx));
+            let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx)
+                .expect(&format!("link could not find symbol pair for \"{}\" at from_idx {}", from, from_idx));
             (from_idx, to_idx)
         };
 
