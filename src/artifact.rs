@@ -49,7 +49,7 @@ pub enum ArtifactError {
 //   _and then_ global definitions
 ///////////////////////////////////////////////
 /// The properties associated with a symbolic reference
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Prop {
     pub global: bool,
     pub function: bool,
@@ -57,7 +57,7 @@ pub struct Prop {
     pub cstring: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
     prop: Prop,
     name: StringID,
@@ -251,7 +251,7 @@ impl ArtifactBuilder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// An abstract binary artifact, which contains code, data, imports, and relocations
 pub struct Artifact {
     /// The name of this artifact
