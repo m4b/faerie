@@ -7,6 +7,9 @@ keywords = ["elf", "mach-o", "binary", "object", "compiler"]
 repository = "https://github.com/m4b/faerie"
 license = "MIT"
 description = "ELF and Mach-o native binary object file emitter"
+documentation = "https://docs.rs/faerie"
+categories = ["development-tools::debugging"]
+include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md", "tests/*"]
 
 [[bin]]
 name = "prototype"
@@ -21,5 +24,4 @@ ordermap = "0.2.10"
 structopt = "0.1.0"
 structopt-derive = "0.1.0"
 string-interner = "0.6.3"
-failure = "0.1.0"
-failure_derive = "0.1.0"
+failure = "0.1.1"

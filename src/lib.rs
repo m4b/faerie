@@ -4,9 +4,8 @@ extern crate ordermap;
 extern crate string_interner;
 #[macro_use]
 extern crate log;
-extern crate failure;
 #[macro_use]
-extern crate failure_derive;
+extern crate failure;
 
 use goblin::container;
 pub use goblin::error as error;
