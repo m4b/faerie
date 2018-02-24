@@ -8,11 +8,16 @@ use std::io::Write;
 use std::fs::File;
 use std::collections::BTreeSet;
 
-use {Target, Data};
+use Target;
+
+/// A blob of binary bytes, representing a function body, or data object
+pub type Data = Vec<u8>;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+/// A raw relocation and its addend, to optionally override the "auto" relocation behavior of faerie.
+/// **NB**: This is implementation defined, and can break code invariants if used improperly, you have been warned.
 pub struct RelocOverride {
-    pub elftype: u32,
+    pub reloc: u32,
     pub addend: i32,
 }
 
@@ -289,7 +294,7 @@ impl Artifact {
             strings: DefaultStringInterner::default(),
         }
     }
-    /// Get this artifacts import vector
+    /// Get an iterator over this artifact's imports
     pub fn imports<'a>(&'a self) -> Box<Iterator<Item = (&'a str, &'a ImportKind)> + 'a> {
         Box::new(self.imports.iter().map(move |&(id, ref kind)| (self.strings.resolve(id).unwrap(), kind)))
     }

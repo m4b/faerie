@@ -8,12 +8,8 @@ extern crate log;
 extern crate failure;
 
 use goblin::container;
-pub use goblin::error as error;
 
 type Ctx = container::Ctx;
-
-/// A blob of binary bytes
-pub type Data = Vec<u8>;
 
 mod target;
 pub use target::Target;
@@ -26,8 +22,3 @@ pub use mach::Mach;
 
 pub mod artifact;
 pub use artifact::{Object, Artifact, ArtifactBuilder, Link, ImportKind, Decl, RelocOverride};
-
-#[cfg(test)]
-mod tests {
-
-}

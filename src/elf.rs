@@ -470,7 +470,7 @@ impl<'a> Elf<'a> {
         };
 
         let (reloc, addend) = if let Some(ovr) = reloctype {
-            (ovr.elftype, ovr.addend as isize)
+            (ovr.reloc, ovr.addend as isize)
         } else {
             match *to_type {
                 // NB: this now forces _all_ function references, whether local or not, through the PLT
