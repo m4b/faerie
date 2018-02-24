@@ -41,15 +41,20 @@ fn link_symbol_pair_panic_issue_30() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
 
     obj.declare("a", Decl::Function { global: true }).expect("can declare a");
-    obj.declare("b", Decl::Function { global: true }).expect("can declare b");
-
-    let code = vec![1, 2, 3, 4];
-    obj.define("b", code).expect("can define b");
+    obj.declare_with("b", Decl::Function { global: true }, vec![1, 2, 3, 4]).expect("can declare and define b");
     obj.link(Link {
         to: "a",
         from: "b",
         at: 0,
-    }).expect("can link a to b");
+    }).expect("can link from b to a");
 
-    let _bytes = obj.emit::<faerie::Elf>().expect("Can emit object bytes");
+    let bytes = obj.emit::<faerie::Elf>().expect("Can emit object bytes");
+    let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
+    match elf {
+        goblin::Object::Elf(elf) => {
+            assert_eq!(elf.syms.len(), 5);
+        },
+        _ => assert!(false)
+    }
+
 }

@@ -312,7 +312,14 @@ impl Artifact {
             }
         }))
     }
-    /// Declare a new symbolic reference, with the given `kind`.
+    /// Declare and define a new symbolic reference with the given `decl` and given `definition`.
+    /// This is sugar for `declare` and then `define`
+    pub fn declare_with<T: AsRef<str>>(&mut self, name: T, decl: Decl, definition: Vec<u8>) -> Result<(), Error> {
+        self.declare(name.as_ref(), decl)?;
+        self.define(name, definition)?;
+        Ok(())
+    }
+    /// Declare a new symbolic reference, with the given `decl`.
     /// **Note**: All declarations _must_ precede their definitions.
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
