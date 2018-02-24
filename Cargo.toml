@@ -3,7 +3,7 @@ name = "faerie"
 version = "0.0.2"
 authors = ["m4b <m4b.github.io@gmail.com>"]
 readme = "README.md"
-keywords = ["sidhe", "binary", "object", "compiler", "emit"]
+keywords = ["elf", "mach-o", "binary", "object", "compiler"]
 repository = "https://github.com/m4b/faerie"
 license = "MIT"
 description = "ELF and Mach-o native binary object file emitter"
@@ -13,7 +13,7 @@ name = "prototype"
 path = "src/bin/main.rs"
 
 [dependencies]
-goblin = "0.0.13"
+goblin = "0.0.14"
 scroll = "0.8"
 log = "0.3.8"
 env_logger = "0.4.3"
