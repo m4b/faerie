@@ -3,18 +3,24 @@
 Emit some object files, at your leisure:
 
 ```rust
-let mut obj = Artifact::new(Target::X86_64, String::from("test.o"));
+let name = "test.o";
+let file = File::create(Path::new(name))?;
+let mut obj = ArtifactBuilder::new(Target::X86_64)
+    .name(name)
+    .finish();
+
 // first we declare our symbolic references;
 // it is a runtime error to define a symbol _without_ declaring it first
 obj.declarations(
     [
         ("deadbeef", Decl::Function { global: false }),
         ("main",     Decl::Function { global: true }),
-        ("str.1",    Decl::Data { global: false }),
+        ("str.1",    Decl::CString { global: false }),
         ("DEADBEEF", Decl::DataImport),
         ("printf",   Decl::FunctionImport),
     ].into_iter().cloned()
 )?;
+
 // we now define our local functions and data
 // 0000000000000000 <deadbeef>:
 //    0:	55                   	push   %rbp
@@ -60,6 +66,7 @@ obj.define("main",
          0x5d,
          0xc3])?;
 obj.define("str.1", b"deadbeef: 0x%x\n\0".to_vec())?;
+
 // Next, we declare our relocations,
 // which are _always_ relative to the `from` symbol
 obj.link(Link { from: "main", to: "str.1", at: 19 })?;
@@ -68,7 +75,7 @@ obj.link(Link { from: "main", to: "deadbeef", at: 10 })?;
 obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 7 })?;
 
 // Finally, we write which object file we desire
-obj.write::<Elf>(::std::fs::File::create(Path::new("test.o"))?)?;
+obj.write::<Elf>(file)?;
 ```
 
 Will emit an object file like this:
