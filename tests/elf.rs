@@ -6,6 +6,7 @@ use faerie::{Artifact, Decl, Target, Link};
 use goblin::elf::*;
 
 #[test]
+// This test is for a known bug (issue #31). When it is fixed, this test should pass.
 #[should_panic]
 fn file_name_is_same_as_symbol_name_issue_31() {
     const NAME: &str = "a";
@@ -17,6 +18,7 @@ fn file_name_is_same_as_symbol_name_issue_31() {
     let bytes = bytes.as_slice();
     println!("{:?}", bytes);
 
+    // Presently, the following expect fails, `bytes` is not a valid Elf:
     let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
     match elf {
         goblin::Object::Elf(elf) => {
@@ -36,6 +38,7 @@ fn file_name_is_same_as_symbol_name_issue_31() {
 }
 
 #[test]
+// This test is for a known bug (issue #30). When it is fixed, this test should pass.
 #[should_panic]
 fn link_symbol_pair_panic_issue_30() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
@@ -48,6 +51,7 @@ fn link_symbol_pair_panic_issue_30() {
         at: 0,
     }).expect("can link from b to a");
 
+    // Presently, a panic happens inside `emit`:
     let bytes = obj.emit::<faerie::Elf>().expect("Can emit object bytes");
     let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
     match elf {
