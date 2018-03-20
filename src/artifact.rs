@@ -1,7 +1,7 @@
 //! An artifact is a platform independent binary object file format abstraction.
 
 use string_interner::DefaultStringInterner;
-use ordermap::OrderMap;
+use indexmap::IndexMap;
 use failure::Error;
 
 use std::io::Write;
@@ -271,7 +271,7 @@ pub struct Artifact {
     imports: Vec<(StringID, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
-    declarations: OrderMap<StringID, Decl>,
+    declarations: IndexMap<StringID, Decl>,
     definitions: BTreeSet<InternalDefinition>,
     strings: DefaultStringInterner,
 }
@@ -289,7 +289,7 @@ impl Artifact {
             name,
             target,
             is_library: false,
-            declarations: OrderMap::new(),
+            declarations: IndexMap::new(),
             definitions: BTreeSet::new(),
             strings: DefaultStringInterner::default(),
         }
@@ -355,7 +355,7 @@ impl Artifact {
             // we have to delete it, because it was upgraded from an import :/
             _ if previous_was_import => {
                 let mut index = None;
-                // FIXME: do binary search or make imports an ordermap
+                // FIXME: do binary search or make imports an indexmap
                 for (i, &(ref name, _)) in self.imports.iter().enumerate() {
                     if *name == decl_name {
                         index = Some (i);

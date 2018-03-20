@@ -10,7 +10,7 @@ use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
 use scroll::IOwrite;
 use string_interner::DefaultStringInterner;
-use ordermap::OrderMap;
+use indexmap::IndexMap;
 
 use goblin::elf::header::{self, Header};
 use goblin::elf::section_header::{SectionHeader};
@@ -294,10 +294,10 @@ impl RelocationBuilder {
 /// An intermediate ELF object file container
 pub struct Elf<'a> {
     name: &'a str,
-    code: OrderMap<StringIndex, &'a [u8]>,
-    relocations: OrderMap<StringIndex, (Section, Vec<Relocation>)>,
-    symbols: OrderMap<StringIndex, Symbol>,
-    section_symbols: OrderMap<StringIndex, Symbol>,
+    code: IndexMap<StringIndex, &'a [u8]>,
+    relocations: IndexMap<StringIndex, (Section, Vec<Relocation>)>,
+    symbols: IndexMap<StringIndex, Symbol>,
+    section_symbols: IndexMap<StringIndex, Symbol>,
     imports: HashMap<StringIndex, ImportKind>,
     sections: HashMap<StringIndex, Section>,
     offsets: HashMap<StringIndex, Offset>,
@@ -335,7 +335,7 @@ impl<'a> Elf<'a> {
         let ctx = Ctx::from(artifact.target.clone());
         let mut offsets = HashMap::new();
         let mut strings = DefaultStringInterner::default();
-        let mut section_symbols = OrderMap::new();
+        let mut section_symbols = IndexMap::new();
         let mut sizeof_strtab = 1;
 
         {
@@ -362,10 +362,10 @@ impl<'a> Elf<'a> {
         let sizeof_bits = Header::size(&ctx);
         Elf {
             name: &artifact.name,
-            code:        OrderMap::new(),
-            relocations: OrderMap::new(),
+            code:        IndexMap::new(),
+            relocations: IndexMap::new(),
             imports:     HashMap::new(),
-            symbols:     OrderMap::new(),
+            symbols:     IndexMap::new(),
             section_symbols,
             sections:    HashMap::new(),
             nsections:   4,
@@ -462,10 +462,8 @@ impl<'a> Elf<'a> {
         let (from_idx, to_idx) = {
             let to_idx = self.strings.get_or_intern(to);
             let from_idx = self.strings.get_or_intern(from);
-            let (to_idx, _, _) = self.symbols.get_pair_index(&to_idx)
-                .expect(&format!("link could not find symbol pair for \"{}\" at to_idx {}", to, to_idx));
-            let (from_idx, _, _) = self.symbols.get_pair_index(&from_idx)
-                .expect(&format!("link could not find symbol pair for \"{}\" at from_idx {}", from, from_idx));
+            let (to_idx, _, _) = self.symbols.get_full(&to_idx).expect("to_idx present in symbols");
+            let (from_idx, _, _) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
             (from_idx, to_idx)
         };
 

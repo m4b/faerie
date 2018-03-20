@@ -1,6 +1,6 @@
 extern crate goblin;
 extern crate scroll;
-extern crate ordermap;
+extern crate indexmap;
 extern crate string_interner;
 #[macro_use]
 extern crate log;
