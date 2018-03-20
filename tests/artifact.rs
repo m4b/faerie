@@ -65,17 +65,16 @@ fn multiple_different_declarations_are_not_ok() {
 }
 
 #[test]
-#[should_panic]
 fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
-    obj.declarations(vec![
+    assert!(obj.declarations(vec![
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::Function { global: true }),
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::Function { global: false }),
     ].into_iter()
-    ).expect("multiple conflicting declarations are not ok");
+    ).is_err()); // multiple conflicting declarations are not ok
 }
 
 #[test]
