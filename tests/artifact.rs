@@ -113,3 +113,22 @@ fn import_helper_adds_declaration_only_once() {
     let imports = obj.imports().collect::<Vec<_>>();
     assert_eq!(imports.len(), 1);
 }
+
+#[test]
+fn undefined_symbols() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.declarations(vec![
+        ("f", faerie::Decl::Function { global: true }),
+        ("g", faerie::Decl::Function { global: false }),
+    ].into_iter()
+    ).expect("can declare");
+    assert_eq!(obj.undefined_symbols(),
+        vec![String::from("f"), String::from("g")]);
+
+    obj.define("g", vec![1, 2, 3, 4]).expect("can define");
+    assert_eq!(obj.undefined_symbols(),
+        vec![String::from("f")]);
+
+    obj.define("f", vec![4, 3, 2, 1]).expect("can define");
+    assert!(obj.undefined_symbols().is_empty());
+}
