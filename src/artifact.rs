@@ -447,10 +447,34 @@ impl Artifact {
 
     }
 
+    /// Get set of non-import declarations that have not been defined. This must be an empty set in
+    /// order to `emit` the artifact.
+    pub fn undefined_symbols(&self) -> Vec<String> {
+        let mut syms = Vec::new();
+        for (&name, &decl) in self.declarations.iter() {
+            match decl {
+                Decl::FunctionImport => {},
+                Decl::DataImport => {},
+                Decl::Function { .. } | Decl::Data { .. } | Decl::CString { .. }=> {
+                    if self.definitions.iter().find(|def| def.name == name).is_none() {
+                        syms.push(String::from(self.strings.resolve(name).expect("declaration has a name")));
+                    }
+                },
+            }
+        }
+        syms
+    }
+
     /// Emit a blob of bytes that represents this object file
     pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {
-        O::to_bytes(self)
+        let undef = self.undefined_symbols();
+        if undef.is_empty() {
+            O::to_bytes(self)
+        } else {
+            Err(format_err!("the following symbols are declared but not defined: {:?}", undef))
+        }
     }
+
     /// Emit and write to disk a blob of bytes that represents this object file
     pub fn write<O: Object>(&self, mut sink: File) -> Result<(), Error> {
         let bytes = self.emit::<O>()?;
