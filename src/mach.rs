@@ -4,7 +4,7 @@ use {Artifact, Target, Object, Ctx};
 use artifact::{Decl, Definition};
 
 use failure::Error;
-use ordermap::OrderMap;
+use indexmap::IndexMap;
 use string_interner::{DefaultStringInterner};
 //use std::collections::HashMap;
 use std::io::{Seek, Cursor, BufWriter, Write};
@@ -222,7 +222,7 @@ type ArtifactData<'a> = Vec<Definition<'a>>;
 
 type StrTableIndex = usize;
 type StrTable = DefaultStringInterner;
-type Symbols = OrderMap<StrTableIndex, SymbolBuilder>;
+type Symbols = IndexMap<StrTableIndex, SymbolBuilder>;
 type Relocations = Vec<Vec<RelocationInfo>>;
 
 /// A mach object symbol table
@@ -230,7 +230,7 @@ type Relocations = Vec<Vec<RelocationInfo>>;
 pub struct SymbolTable {
     symbols: Symbols,
     strtable: StrTable,
-    indexes: OrderMap<StrTableIndex, SymbolIndex>,
+    indexes: IndexMap<StrTableIndex, SymbolIndex>,
     strtable_size: StrtableOffset,
 }
 
@@ -252,7 +252,7 @@ impl SymbolTable {
             symbols: Symbols::new(),
             strtable,
             strtable_size,
-            indexes: OrderMap::new(),
+            indexes: IndexMap::new(),
         }
     }
     /// The number of symbols in this table
