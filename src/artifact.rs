@@ -450,16 +450,18 @@ impl Artifact {
     /// Get set of non-import declarations that have not been defined. This must be an empty set in
     /// order to `emit` the artifact.
     pub fn undefined_symbols(&self) -> Vec<String> {
+        let mut decls = self.declarations.clone();
+        for def in self.definitions.iter() {
+            decls.remove(&def.name);
+        }
+
         let mut syms = Vec::new();
-        for (&name, &decl) in self.declarations.iter() {
+        for (&name, &decl) in decls.iter() {
             match decl {
-                Decl::FunctionImport => {},
-                Decl::DataImport => {},
-                Decl::Function { .. } | Decl::Data { .. } | Decl::CString { .. }=> {
-                    if self.definitions.iter().find(|def| def.name == name).is_none() {
-                        syms.push(String::from(self.strings.resolve(name).expect("declaration has a name")));
-                    }
-                },
+                Decl::FunctionImport | Decl::DataImport => {},
+                Decl::Function { .. } | Decl::Data { .. } | Decl::CString { .. } => {
+                    syms.push(String::from(self.strings.resolve(name).expect("declaration has a name")));
+                }
             }
         }
         syms

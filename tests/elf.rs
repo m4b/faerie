@@ -53,7 +53,7 @@ fn link_symbol_pair_panic_issue_30() {
         at: 0,
     }).expect("can link from b to a");
 
-    assert_eq!(obj.undefined_symbols().len(), 1);
+    assert_eq!(obj.undefined_symbols(), vec![String::from("a")]);
 
     // The `emit` method will check that there are undefined symbols
     // and return an error describing them:
