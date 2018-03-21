@@ -114,6 +114,25 @@ fn import_helper_adds_declaration_only_once() {
 }
 
 #[test]
+fn reject_duplicate_definitions() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.declarations(vec![
+        ("f", faerie::Decl::Function { global: true }),
+        ("g", faerie::Decl::Function { global: false }),
+    ].into_iter()
+    ).expect("can declare");
+
+    obj.define("g", vec![1, 2, 3, 4]).expect("can define");
+    // Reject duplicate definition:
+    assert!(obj.define("g", vec![1, 2, 3, 4]).is_err());
+
+    obj.define("f", vec![4, 3, 2, 1]).expect("can define");
+    // Reject duplicate definitions:
+    assert!(obj.define("g", vec![1, 2, 3, 4]).is_err());
+    assert!(obj.define("f", vec![1, 2, 3, 4]).is_err());
+}
+
+#[test]
 fn undefined_symbols() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
     obj.declarations(vec![
