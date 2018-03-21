@@ -65,17 +65,16 @@ fn multiple_different_declarations_are_not_ok() {
 }
 
 #[test]
-#[should_panic]
 fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
-    obj.declarations(vec![
+    assert!(obj.declarations(vec![
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::Function { global: true }),
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::FunctionImport),
         ("f", faerie::Decl::Function { global: false }),
     ].into_iter()
-    ).expect("multiple conflicting declarations are not ok");
+    ).is_err()); // multiple conflicting declarations are not ok
 }
 
 #[test]
@@ -112,4 +111,42 @@ fn import_helper_adds_declaration_only_once() {
     obj.import("f", faerie::ImportKind::Function).expect("can import");
     let imports = obj.imports().collect::<Vec<_>>();
     assert_eq!(imports.len(), 1);
+}
+
+#[test]
+fn reject_duplicate_definitions() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.declarations(vec![
+        ("f", faerie::Decl::Function { global: true }),
+        ("g", faerie::Decl::Function { global: false }),
+    ].into_iter()
+    ).expect("can declare");
+
+    obj.define("g", vec![1, 2, 3, 4]).expect("can define");
+    // Reject duplicate definition:
+    assert!(obj.define("g", vec![1, 2, 3, 4]).is_err());
+
+    obj.define("f", vec![4, 3, 2, 1]).expect("can define");
+    // Reject duplicate definitions:
+    assert!(obj.define("g", vec![1, 2, 3, 4]).is_err());
+    assert!(obj.define("f", vec![1, 2, 3, 4]).is_err());
+}
+
+#[test]
+fn undefined_symbols() {
+    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    obj.declarations(vec![
+        ("f", faerie::Decl::Function { global: true }),
+        ("g", faerie::Decl::Function { global: false }),
+    ].into_iter()
+    ).expect("can declare");
+    assert_eq!(obj.undefined_symbols(),
+        vec![String::from("f"), String::from("g")]);
+
+    obj.define("g", vec![1, 2, 3, 4]).expect("can define");
+    assert_eq!(obj.undefined_symbols(),
+        vec![String::from("f")]);
+
+    obj.define("f", vec![4, 3, 2, 1]).expect("can define");
+    assert!(obj.undefined_symbols().is_empty());
 }

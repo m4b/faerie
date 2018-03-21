@@ -37,6 +37,8 @@ pub enum ArtifactError {
     #[fail(display = "Incompatible declarations, old declaration {:?} is incompatible with new {:?}", old, new)]
     /// An incompatble declaration occurred, please see the [absorb](enum.Decl.html#method.absorb) method on `Decl`
     IncompatibleDeclaration { old: Decl, new: Decl },
+    #[fail(display = "duplicate definition of symbol: {}", _0)]
+    DuplicateDefinition(String),
 }
 
 ///////////////////////////////////////////////
@@ -157,6 +159,27 @@ impl Decl {
     }
 }
 
+/// A declaration, plus a flag to track whether we have a definition for it yet
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct InternalDecl {
+    decl: Decl,
+    defined: bool,
+}
+
+impl InternalDecl {
+    /// Wrap up a declaration. Initially marked as not defined.
+    pub fn new(decl: Decl) -> Self {
+        Self {
+            decl: decl,
+            defined: false,
+        }
+    }
+    /// Mark a declaration as defined.
+    pub fn define(&mut self) {
+        self.defined = true;
+    }
+}
+
 /// A binding of a raw `name` to its declaration, `decl`
 pub(crate) struct Binding<'a> {
     pub name: &'a str,
@@ -271,7 +294,7 @@ pub struct Artifact {
     imports: Vec<(StringID, ImportKind)>,
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
-    declarations: IndexMap<StringID, Decl>,
+    declarations: IndexMap<StringID, InternalDecl>,
     definitions: BTreeSet<InternalDefinition>,
     strings: DefaultStringInterner,
 }
@@ -307,8 +330,8 @@ impl Artifact {
             // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
             // ensure it has a declaration
             let (ref from_decl, ref to_decl) = (self.declarations.get(from).expect("declaration present"), self.declarations.get(to).unwrap());
-            let from = Binding { name: self.strings.resolve(*from).expect("from link"), decl: from_decl};
-            let to = Binding { name: self.strings.resolve(*to).expect("to link"), decl: to_decl};
+            let from = Binding { name: self.strings.resolve(*from).expect("from link"), decl: &from_decl.decl};
+            let to = Binding { name: self.strings.resolve(*to).expect("to link"), decl: &to_decl.decl};
             LinkAndDecl {
                 from,
                 to,
@@ -329,14 +352,14 @@ impl Artifact {
     pub fn declare<T: AsRef<str>>(&mut self, name: T, decl: Decl) -> Result<(), Error> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
         let previous_was_import;
-        let new_decl = {
-            let previous_decl = self.declarations.entry(decl_name).or_insert(decl.clone());
-            previous_was_import = previous_decl.is_import();
-            previous_decl.absorb(decl)?;
-            &*previous_decl
+        let new_idecl = {
+            let previous = self.declarations.entry(decl_name).or_insert(InternalDecl::new(decl.clone()));
+            previous_was_import = previous.decl.is_import();
+            previous.decl.absorb(decl)?;
+            previous
         };
-        match new_decl {
-            &Decl::DataImport | &Decl::FunctionImport => {
+        match new_idecl.decl {
+            Decl::DataImport | Decl::FunctionImport => {
                 // we have to check because otherwise duplicate imports cause an error
                 // FIXME: ditto fixme, below, use orderset
                 let mut present = false;
@@ -346,7 +369,7 @@ impl Artifact {
                     }
                 }
                 if !present {
-                    let kind = ImportKind::from_decl(new_decl)
+                    let kind = ImportKind::from_decl(&new_idecl.decl)
                         .expect("can convert from explicitly matched decls to importkind");
                     self.imports.push((decl_name, kind));
                 }
@@ -382,13 +405,16 @@ impl Artifact {
     /// If you attempt to define something which has not been declared, this will return an error.
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
-        match self.declarations.get(&decl_name) {
-            Some(ref stype) => {
-                let prop = match *stype {
-                    &Decl::CString { global } => Prop { global, function: false, writeable: false, cstring: true },
-                    &Decl::Data { global, writeable } => Prop { global, function: false, writeable, cstring: false },
-                    &Decl::Function { global } => Prop { global, function: true, writeable: false, cstring: false},
-                    _ if stype.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
+        match self.declarations.get_mut(&decl_name) {
+            Some(ref mut stype) => {
+                if stype.defined {
+                    return Err(ArtifactError::DuplicateDefinition(name.as_ref().to_string()));
+                }
+                let prop = match stype.decl {
+                    Decl::CString { global } => Prop { global, function: false, writeable: false, cstring: true },
+                    Decl::Data { global, writeable } => Prop { global, function: false, writeable, cstring: false },
+                    Decl::Function { global } => Prop { global, function: true, writeable: false, cstring: false},
+                    _ if stype.decl.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
                 self.definitions.insert(InternalDefinition {
@@ -396,6 +422,7 @@ impl Artifact {
                     data,
                     prop,
                 });
+                stype.define();
             }
             None => return Err(ArtifactError::Undeclared(name.as_ref().to_string())),
         }
@@ -430,7 +457,7 @@ impl Artifact {
         let (link_from, link_to) = (self.strings.get_or_intern(link.from), self.strings.get_or_intern(link.to));
         match (self.declarations.get(&link_from), self.declarations.get(&link_to)) {
             (Some(ref from_type), Some(_)) => {
-                if from_type.is_import() {
+                if from_type.decl.is_import() {
                     return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
                 }
                 let link = (link_from, link_to, link.at, reloc);
@@ -447,10 +474,26 @@ impl Artifact {
 
     }
 
+    /// Get set of non-import declarations that have not been defined. This must be an empty set in
+    /// order to `emit` the artifact.
+    pub fn undefined_symbols(&self) -> Vec<String> {
+        let mut syms = Vec::new();
+        for (&name, _) in self.declarations.iter().filter(|&(_, &int)| !int.defined && !int.decl.is_import()) {
+            syms.push(String::from(self.strings.resolve(name).expect("declaration has a name")));
+        }
+        syms
+    }
+
     /// Emit a blob of bytes that represents this object file
     pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {
-        O::to_bytes(self)
+        let undef = self.undefined_symbols();
+        if undef.is_empty() {
+            O::to_bytes(self)
+        } else {
+            Err(format_err!("the following symbols are declared but not defined: {:?}", undef))
+        }
     }
+
     /// Emit and write to disk a blob of bytes that represents this object file
     pub fn write<O: Object>(&self, mut sink: File) -> Result<(), Error> {
         let bytes = self.emit::<O>()?;

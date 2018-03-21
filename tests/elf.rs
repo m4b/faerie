@@ -6,6 +6,7 @@ use faerie::{Artifact, Decl, Target, Link};
 use goblin::elf::*;
 
 #[test]
+// This test is for a known bug (issue #31). When it is fixed, this test should pass.
 #[should_panic]
 fn file_name_is_same_as_symbol_name_issue_31() {
     const NAME: &str = "a";
@@ -17,6 +18,7 @@ fn file_name_is_same_as_symbol_name_issue_31() {
     let bytes = bytes.as_slice();
     println!("{:?}", bytes);
 
+    // Presently, the following expect fails, `bytes` is not a valid Elf:
     let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
     match elf {
         goblin::Object::Elf(elf) => {
@@ -36,25 +38,24 @@ fn file_name_is_same_as_symbol_name_issue_31() {
 }
 
 #[test]
-#[should_panic]
+// Regression test for issue 30: previously, if a non-import symbol was declared but not defined,
+// the elf emit function would panic
 fn link_symbol_pair_panic_issue_30() {
     let mut obj = Artifact::new(Target::X86_64, "t.o".into());
 
     obj.declare("a", Decl::Function { global: true }).expect("can declare a");
     obj.declare_with("b", Decl::Function { global: true }, vec![1, 2, 3, 4]).expect("can declare and define b");
+
+
     obj.link(Link {
         to: "a",
         from: "b",
         at: 0,
     }).expect("can link from b to a");
 
-    let bytes = obj.emit::<faerie::Elf>().expect("Can emit object bytes");
-    let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
-    match elf {
-        goblin::Object::Elf(elf) => {
-            assert_eq!(elf.syms.len(), 5);
-        },
-        _ => assert!(false)
-    }
+    assert_eq!(obj.undefined_symbols(), vec![String::from("a")]);
 
+    // The `emit` method will check that there are undefined symbols
+    // and return an error describing them:
+    assert!(obj.emit::<faerie::Elf>().is_err());
 }
