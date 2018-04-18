@@ -4,7 +4,7 @@ use goblin;
 use failure::Error;
 use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind, RelocOverride};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map};
 use std::fmt;
 use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
@@ -297,6 +297,7 @@ pub struct Elf<'a> {
     code: IndexMap<StringIndex, &'a [u8]>,
     relocations: IndexMap<StringIndex, (Section, Vec<Relocation>)>,
     symbols: IndexMap<StringIndex, Symbol>,
+    special_symbols: Vec<Symbol>,
     section_symbols: IndexMap<StringIndex, Symbol>,
     imports: HashMap<StringIndex, ImportKind>,
     sections: HashMap<StringIndex, Section>,
@@ -335,7 +336,8 @@ impl<'a> Elf<'a> {
         let ctx = Ctx::from(artifact.target.clone());
         let mut offsets = HashMap::new();
         let mut strings = DefaultStringInterner::default();
-        let mut section_symbols = IndexMap::new();
+        let mut special_symbols = Vec::new();
+        let section_symbols = IndexMap::new();
         let mut sizeof_strtab = 1;
 
         {
@@ -346,16 +348,15 @@ impl<'a> Elf<'a> {
                 let offset = sizeof_strtab;
                 offsets.insert(idx, offset);
                 sizeof_strtab += size;
-                (idx, offset)
+                offset
             };
 
             push_strtab(".strtab");
             push_strtab(".symtab");
-            let (idx, offset) = push_strtab(&artifact.name);
-            // NOTE: using 0 as the idx is a hack;
-            // but we need to insert a null symbol as the first symbol, otherwise linkers explode
-            section_symbols.insert(0, Symbol::default());
-            section_symbols.insert(idx, SymbolBuilder::new(SymbolType::File).name_offset(offset).create());
+            let offset = push_strtab(&artifact.name);
+            // ELF requires a null symbol as the first symbol.
+            special_symbols.push(Symbol::default());
+            special_symbols.push(SymbolBuilder::new(SymbolType::File).name_offset(offset).create());
 
         }
 
@@ -366,6 +367,7 @@ impl<'a> Elf<'a> {
             relocations: IndexMap::new(),
             imports:     HashMap::new(),
             symbols:     IndexMap::new(),
+            special_symbols,
             section_symbols,
             sections:    HashMap::new(),
             nsections:   4,
@@ -380,11 +382,17 @@ impl<'a> Elf<'a> {
     }
     fn new_string(&mut self, name: String) -> (StringIndex, usize) {
         let size = name.len() + 1;
-        let offset = self.sizeof_strtab;
         let idx = self.strings.get_or_intern(name);
-        self.offsets.insert(idx, offset);
-        self.sizeof_strtab += size;
-        (idx, offset)
+        match self.offsets.entry(idx) {
+            hash_map::Entry::Occupied(entry) => {
+                (idx, *entry.get())
+            }
+            hash_map::Entry::Vacant(entry) => {
+                let offset = self.sizeof_strtab;
+                self.sizeof_strtab += size;
+                (idx, *entry.insert(offset))
+            }
+        }
     }
     pub fn add_definition(&mut self, name: &str, data: &'a [u8], prop: &artifact::Prop) {
         // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
@@ -484,8 +492,11 @@ impl<'a> Elf<'a> {
         let sym_idx = match *to_type {
             Decl::Function {..} | Decl::Data {..} | Decl::CString {..} => to_idx + 2,
             // +2 for NOTYPE and FILE symbols
-            Decl::FunctionImport | Decl::DataImport => to_idx + self.section_symbols.len(),
-            // + section_symbols.len() because this is where the import symbols begin
+            Decl::FunctionImport | Decl::DataImport => {
+                to_idx + self.special_symbols.len() + self.section_symbols.len()
+                // + special_symbols.len() + section_symbols.len() because this is where the import
+                // symbols begin
+            }
         };
 
         let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(offset).addend(addend).create();
@@ -518,7 +529,9 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Compute Offsets
         /////////////////////////////////////
-        let sizeof_symtab = (self.symbols.len() + self.section_symbols.len()) * Symbol::size(self.ctx.container);
+        let sizeof_symtab = (self.symbols.len() +
+                             self.special_symbols.len() +
+                             self.section_symbols.len()) * Symbol::size(self.ctx.container);
         let sizeof_relocs = self.relocations.iter().fold(0, |acc, (_, &(ref _shdr, ref rels))| rels.len() + acc) * Relocation::size(true, self.ctx);
         let nonexec_stack_note_name_offset = self.new_string(".note.GNU-stack".into()).1;
         let strtab_offset = self.sizeof_bits as u64;
@@ -573,7 +586,8 @@ impl<'a> Elf<'a> {
         symtab.sh_link = 1; // we link to our strtab above
         // FunFact: symtab.sh_info acts as a delimiter pointing to which are the "external" functions in the object file;
         // if this isn't correct, it will segfault linkers or cause them to _sometimes_ emit garbage, ymmv
-        symtab.sh_info = (self.section_symbols.len() + self.nlocals) as u32;
+        symtab.sh_info =
+            (self.special_symbols.len() + self.section_symbols.len() + self.nlocals) as u32;
         section_headers.push(symtab);
 
         /////////////////////////////////////
@@ -592,6 +606,10 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Symtab
         /////////////////////////////////////
+        for symbol in self.special_symbols.into_iter() {
+            debug!("Special Symbol: {:?}", symbol);
+            file.iowrite_with(symbol, self.ctx)?;
+        }
         for (_id, symbol) in self.section_symbols.into_iter() {
             debug!("Section Symbol: {:?}", symbol);
             file.iowrite_with(symbol, self.ctx)?;
