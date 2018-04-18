@@ -6,8 +6,7 @@ use faerie::{Artifact, Decl, Target, Link};
 use goblin::elf::*;
 
 #[test]
-// This test is for a known bug (issue #31). When it is fixed, this test should pass.
-#[should_panic]
+// This test is for a known bug (issue #31).
 fn file_name_is_same_as_symbol_name_issue_31() {
     const NAME: &str = "a";
     let mut obj = Artifact::new(Target::X86_64, "a".into());
@@ -22,13 +21,18 @@ fn file_name_is_same_as_symbol_name_issue_31() {
     let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
     match elf {
         goblin::Object::Elf(elf) => {
-            assert_eq!(elf.syms.len(), 3);
+            assert_eq!(elf.syms.len(), 4);
             let syms =  elf.syms.iter().collect::<Vec<_>>();
             let sym = syms.iter().find(|sym| {
-                sym.st_type() as u32 == section_header::SHN_ABS
+                sym.st_shndx == section_header::SHN_ABS as usize
             }).expect("There should be a SHN_ABS symbol");
-            println!("{:?}", sym);
-            assert_eq!(&elf.strtab[sym.st_name], "a");
+            assert_eq!(&elf.strtab[sym.st_name], NAME);
+            assert_eq!(sym.st_type(), sym::STT_FILE);
+
+            let sym = syms.iter().find(|sym| {
+                sym.st_type()  == sym::STT_FUNC
+            }).expect("There should be a STT_FUNC symbol");
+            assert_eq!(&elf.strtab[sym.st_name], NAME);
         },
         _ => {
             println!("Elf file not parsed as elf file");
