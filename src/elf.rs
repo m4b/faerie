@@ -611,7 +611,7 @@ impl<'a> Elf<'a> {
         }
         let after_symtab = file.seek(Current(0))?;
         debug!("after_symtab {:#x} - shdr_size {}", after_symtab, Section::size(&self.ctx));
-        assert_eq!(after_symtab, sh_offset);
+        assert_eq!(after_symtab, reloc_offset);
 
         /////////////////////////////////////
         // Relocations
@@ -626,6 +626,9 @@ impl<'a> Elf<'a> {
                 file.iowrite_with(relocation, (relocation.is_rela, self.ctx))?;
             }
         }
+        let after_relocs = file.seek(Current(0))?;
+        debug!("after_relocs {:#x}", after_relocs);
+        assert_eq!(after_relocs, sh_offset);
 
         /////////////////////////////////////
         // Non-executable stack note.
