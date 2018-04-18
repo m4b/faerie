@@ -541,7 +541,8 @@ impl<'a> Elf<'a> {
         
         file.iowrite_with(header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
-        debug!("after_header {:#x}, expect: {:#x} - {}", after_header, Header::size(&self.ctx), after_header == Header::size(&self.ctx) as u64);
+        debug!("after_header {:#x}", after_header);
+        assert_eq!(after_header, Header::size(&self.ctx) as u64);
 
         /////////////////////////////////////
         // Code
@@ -551,7 +552,8 @@ impl<'a> Elf<'a> {
             file.write(bytes)?;
         }
         let after_code = file.seek(Current(0))?;
-        debug!("after_code {:#x}, expect: {:#x} - {}", after_code, strtab_offset, after_code == strtab_offset);
+        debug!("after_code {:#x}", after_code);
+        assert_eq!(after_code, strtab_offset);
 
         /////////////////////////////////////
         // Init sections
@@ -587,7 +589,8 @@ impl<'a> Elf<'a> {
             file.iowrite(0u8)?;
         }
         let after_strtab = file.seek(Current(0))?;
-        debug!("after_strtab {:#x}, expect: {:#x} - {}", after_strtab, symtab_offset, after_strtab == symtab_offset);
+        debug!("after_strtab {:#x}", after_strtab);
+        assert_eq!(after_strtab, symtab_offset);
 
         /////////////////////////////////////
         // Symtab
@@ -607,7 +610,8 @@ impl<'a> Elf<'a> {
             }
         }
         let after_symtab = file.seek(Current(0))?;
-        debug!("after_symtab {:#x}, expect: {:#x} - {} - shdr_size {}", after_symtab, sh_offset, after_symtab == sh_offset, Section::size(&self.ctx) as u64);
+        debug!("after_symtab {:#x} - shdr_size {}", after_symtab, Section::size(&self.ctx));
+        assert_eq!(after_symtab, sh_offset);
 
         /////////////////////////////////////
         // Relocations
@@ -643,7 +647,8 @@ impl<'a> Elf<'a> {
 
         let after_shdrs = file.seek(Current(0))?;
         let expected = sh_offset + shdr_size;
-        debug!("after_shdrs {:#x}, expect: {:#x} - {}", after_shdrs, expected, after_shdrs == expected);
+        debug!("after_shdrs {:#x}", after_shdrs);
+        assert_eq!(after_shdrs, expected);
         debug!("done");
         Ok(())
     }
