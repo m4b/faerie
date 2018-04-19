@@ -174,7 +174,7 @@ fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
 fn main () {
     let args = Args::from_args();
     if args.debug { ::env::set_var("RUST_LOG", "faerie=debug"); };
-    env_logger::init().unwrap();
+    env_logger::init();
     let res = if args.deadbeef { deadbeef(args) } else { run(args) };
     match res {
         Ok(()) => (),
