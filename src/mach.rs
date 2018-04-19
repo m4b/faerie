@@ -474,7 +474,7 @@ impl<'a> Mach<'a> {
         // write load commands
         //////////////////////////////
         file.iowrite_with(segment_load_command, self.ctx)?;
-        file.write(&raw_sections)?;
+        file.write_all(&raw_sections)?;
         file.iowrite_with(symtab_load_command, self.ctx.le)?;
         debug!("SEEK: after load commands: {}", file.seek(Current(0))?);
 
@@ -482,7 +482,7 @@ impl<'a> Mach<'a> {
         // write code
         //////////////////////////////
         for code in self.code {
-            file.write(code.data)?;
+            file.write_all(code.data)?;
         }
         debug!("SEEK: after code: {}", file.seek(Current(0))?);
 
@@ -490,7 +490,7 @@ impl<'a> Mach<'a> {
         // write data
         //////////////////////////////
         for data in self.data {
-            file.write(data.data)?;
+            file.write_all(data.data)?;
         }
         debug!("SEEK: after data: {}", file.seek(Current(0))?);
 
@@ -513,7 +513,7 @@ impl<'a> Mach<'a> {
             debug!("{}: {:?}", idx, string);
             // yup, an underscore
             file.iowrite(0x5fu8)?;
-            file.write(string.as_bytes())?;
+            file.write_all(string.as_bytes())?;
             file.iowrite(0u8)?;
         }
         debug!("SEEK: after strtable: {}", file.seek(Current(0))?);

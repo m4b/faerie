@@ -561,7 +561,7 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
 
         for (_idx, bytes) in self.code.drain(..) {
-            file.write(bytes)?;
+            file.write_all(bytes)?;
         }
         let after_code = file.seek(Current(0))?;
         debug!("after_code {:#x}, expect: {:#x} - {}", after_code, strtab_offset, after_code == strtab_offset);
@@ -597,7 +597,7 @@ impl<'a> Elf<'a> {
         file.iowrite(0u8)?; // for the null value in the strtab;
         for (_id, string) in self.strings.iter() {
             debug!("String: {:?}", string);
-            file.write(string.as_bytes())?;
+            file.write_all(string.as_bytes())?;
             file.iowrite(0u8)?;
         }
         let after_strtab = file.seek(Current(0))?;
