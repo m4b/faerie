@@ -181,13 +181,15 @@ impl InternalDecl {
 }
 
 /// A binding of a raw `name` to its declaration, `decl`
-pub(crate) struct Binding<'a> {
+#[derive(Debug)]
+pub struct Binding<'a> {
     pub name: &'a str,
     pub decl: &'a Decl,
 }
 
 /// A relocation binding one declaration to another
-pub(crate) struct LinkAndDecl<'a> {
+#[derive(Debug)]
+pub struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
     pub at: usize,

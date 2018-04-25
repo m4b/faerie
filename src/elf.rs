@@ -2,7 +2,8 @@
 
 use goblin;
 use failure::Error;
-use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind, RelocOverride};
+use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind};
+pub use artifact::LinkAndDecl;
 
 use std::collections::{HashMap, hash_map};
 use std::fmt;
@@ -465,20 +466,20 @@ impl<'a> Elf<'a> {
         self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
-    pub fn link(&mut self, from: &str, to: &str, offset: usize, to_type: &Decl, reloctype: Option<RelocOverride>) {
-        debug!("Link: {:?} -> {:?} - {:?}", from, to, to_type);
+    pub fn link(&mut self, l: &LinkAndDecl) {
+        debug!("Link: {:?}", l);
         let (from_idx, to_idx) = {
-            let to_idx = self.strings.get_or_intern(to);
-            let from_idx = self.strings.get_or_intern(from);
+            let to_idx = self.strings.get_or_intern(l.to.name);
+            let from_idx = self.strings.get_or_intern(l.from.name);
             let (to_idx, _, _) = self.symbols.get_full(&to_idx).expect("to_idx present in symbols");
             let (from_idx, _, _) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
             (from_idx, to_idx)
         };
-
-        let (reloc, addend) = if let Some(ovr) = reloctype {
+        let is_big = self.ctx.is_big();
+        let (reloc, addend) = if let Some(ovr) = l.reloc {
             (ovr.reloc, ovr.addend as isize)
         } else {
-            match *to_type {
+            match *l.to.decl {
                 // NB: this now forces _all_ function references, whether local or not, through the PLT
                 // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
                 Decl::Function {..} => (reloc::R_X86_64_PLT32, -4),
@@ -489,7 +490,7 @@ impl<'a> Elf<'a> {
             }
         };
 
-        let sym_idx = match *to_type {
+        let sym_idx = match *l.to.decl {
             Decl::Function {..} | Decl::Data {..} | Decl::CString {..} => to_idx + 2,
             // +2 for NOTYPE and FILE symbols
             Decl::FunctionImport | Decl::DataImport => {
@@ -499,8 +500,8 @@ impl<'a> Elf<'a> {
             }
         };
 
-        let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(offset).addend(addend).create();
-        self.add_reloc(from, reloc, from_idx)
+        let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(l.at).addend(addend).create();
+        self.add_reloc(l.from.name, reloc, from_idx)
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize) {
         debug!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
@@ -689,7 +690,7 @@ impl<'a> Object for Elf<'a> {
             elf.import(import.to_string(), kind);
         }
         for link in artifact.links() {
-            elf.link(link.from.name, link.to.name, link.at, link.to.decl, link.reloc);
+            elf.link(&link);
         }
         let mut buffer = Cursor::new(Vec::new());
         elf.write(&mut buffer)?;
