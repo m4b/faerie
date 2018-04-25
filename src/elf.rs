@@ -3,7 +3,7 @@
 use goblin;
 use failure::Error;
 use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind};
-pub use artifact::LinkAndDecl;
+use artifact::LinkAndDecl;
 
 use std::collections::{HashMap, hash_map};
 use std::fmt;
