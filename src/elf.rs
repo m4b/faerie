@@ -475,18 +475,29 @@ impl<'a> Elf<'a> {
             let (from_idx, _, _) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
             (from_idx, to_idx)
         };
-        let is_big = self.ctx.is_big();
         let (reloc, addend) = if let Some(ovr) = l.reloc {
             (ovr.reloc, ovr.addend as isize)
         } else {
-            match *l.to.decl {
-                // NB: this now forces _all_ function references, whether local or not, through the PLT
-                // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                Decl::Function {..} => (reloc::R_X86_64_PLT32, -4),
-                Decl::Data {..} => (reloc::R_X86_64_PC32, 0),
-                Decl::CString {..} => (reloc::R_X86_64_PC32, 0),
-                Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
-                Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+            match *l.from.decl {
+                Decl::Function {..} => {
+                    match *l.to.decl {
+                        // NB: this now forces _all_ function references, whether local or not, through the PLT
+                        // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
+                        Decl::Function {..} | Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
+                        Decl::Data {..} => (reloc::R_X86_64_PC32, 0),
+                        Decl::CString {..} => (reloc::R_X86_64_PC32, 0),
+                        Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+                    }
+                },
+                Decl::Data {..} => {
+                    if self.ctx.is_big() {
+                        // Select an absolute relocation that is the size of a pointer.
+                        (reloc::R_X86_64_64, 0)
+                    } else {
+                        (reloc::R_X86_64_32, 0)
+                    }
+                }
+                _ => panic!("unsupported relocation {:?}", l),
             }
         };
 
