@@ -2,26 +2,19 @@
 
 use container;
 use Ctx;
+use targeting::{Triple, PointerWidth, Endianness};
 
-/// A machine architecture target
-#[derive(Debug, Copy, Clone)]
-pub enum Target {
-    X86_64,
-    X86,
-    ARM64,
-    ARMv7,
-    Unknown,
-}
-
-impl From<Target> for Ctx {
-    fn from(target: Target) -> Self {
-        use self::Target::*;
-        match target {
-            X86_64 => Ctx::new(container::Container::Big,   container::Endian::Little),
-            X86 => Ctx::new(container::Container::Little,   container::Endian::Little),
-            ARM64 => Ctx::new(container::Container::Big,    container::Endian::Little),
-            ARMv7 => Ctx::new(container::Container::Little, container::Endian::Little),
-            Unknown => Ctx::default(),
-        }
-    }
+pub fn make_ctx(target: &Triple) -> Ctx {
+    let container_size = match target.pointer_width() {
+        Err(()) |
+        Ok(PointerWidth::U16) => return Ctx::default(),
+        Ok(PointerWidth::U32) => container::Container::Little,
+        Ok(PointerWidth::U64) => container::Container::Big,
+    };
+    let endianness = match target.endianness() {
+        Err(()) => return Ctx::default(),
+        Ok(Endianness::Little) => container::Endian::Little,
+        Ok(Endianness::Big) => container::Endian::Big,
+    };
+    Ctx::new(container_size, endianness)
 }

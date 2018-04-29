@@ -1,7 +1,8 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use {Artifact, Target, Object, Ctx};
+use {Artifact, Ctx};
 use artifact::{Decl, Definition};
+use target::make_ctx;
 
 use failure::Error;
 use indexmap::IndexMap;
@@ -11,6 +12,7 @@ use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
 use scroll::{Pwrite, IOwrite};
 use scroll::ctx::SizeWith;
+use targeting::Architecture;
 
 use goblin::mach::cputype;
 use goblin::mach::segment::{Section, Segment};
@@ -21,29 +23,43 @@ use goblin::mach::relocation::{RelocationInfo, RelocType, SIZEOF_RELOCATION_INFO
 
 struct CpuType(cputype::CpuType);
 
-impl From<Target> for CpuType {
-    fn from(target: Target) -> CpuType {
-        use self::Target::*;
+impl From<Architecture> for CpuType {
+    fn from(architecture: Architecture) -> CpuType {
+        use targeting::Architecture::*;
         use mach::cputype::*;
-        CpuType(match target {
+        CpuType(match architecture {
             X86_64 => CPU_TYPE_X86_64,
-            X86 => CPU_TYPE_X86,
-            ARM64 => CPU_TYPE_ARM64,
-            ARMv7 => CPU_TYPE_ARM,
-            Unknown => 0
+            I386 |
+            I586 |
+            I686 => CPU_TYPE_X86,
+            Aarch64 => CPU_TYPE_ARM64,
+            Arm |
+            Armv4t |
+            Armv5te |
+            Armv7 |
+            Armv7s |
+            Thumbv6m |
+            Thumbv7em |
+            Thumbv7m => CPU_TYPE_ARM,
+            Sparc => CPU_TYPE_SPARC,
+            Powerpc  => CPU_TYPE_POWERPC,
+            Powerpc64 |
+            Powerpc64le => CPU_TYPE_POWERPC64,
+            Unknown => 0,
+            _ => panic!("requested architecture does not exist in MachO"),
         })
     }
 }
 
-pub type SectionIndex = usize;
-pub type StrtableOffset = usize;
+type SectionIndex = usize;
+type StrtableOffset = usize;
 
 const CODE_SECTION_INDEX: SectionIndex = 0;
 const DATA_SECTION_INDEX: SectionIndex = 1;
 
 /// A builder for creating a 32/64 bit Mach-o Nlist symbol
 #[derive(Debug)]
-pub struct SymbolBuilder {
+struct SymbolBuilder {
     name: StrtableOffset,
     section: Option<SectionIndex>,
     global: bool,
@@ -119,11 +135,11 @@ impl SymbolBuilder {
 }
 
 /// An index into the symbol table
-pub type SymbolIndex = usize;
+type SymbolIndex = usize;
 
 /// Mach relocation builder
 #[derive(Debug)]
-pub struct RelocationBuilder {
+struct RelocationBuilder {
     symbol: SymbolIndex,
     relocation_offset: usize,
     absolute: bool,
@@ -163,7 +179,7 @@ impl RelocationBuilder {
 
 /// Helper to build sections
 #[derive(Debug, Clone)]
-pub struct SectionBuilder {
+struct SectionBuilder {
     addr: usize,
     align: usize,
     offset: usize,
@@ -227,7 +243,7 @@ type Relocations = Vec<Vec<RelocationInfo>>;
 
 /// A mach object symbol table
 #[derive(Debug, Default)]
-pub struct SymbolTable {
+struct SymbolTable {
     symbols: Symbols,
     strtable: StrTable,
     indexes: IndexMap<StrTableIndex, SymbolIndex>,
@@ -235,7 +251,7 @@ pub struct SymbolTable {
 }
 
 /// The kind of symbol this is
-pub enum SymbolType {
+enum SymbolType {
     /// Which `section` this is defined in, and at what `offset`
     Defined { section: SectionIndex, offset: usize, global: bool },
     /// An undefined symbol (an import)
@@ -304,7 +320,7 @@ impl SymbolTable {
 
 #[derive(Debug)]
 /// A Mach-o program segment
-pub struct SegmentBuilder {
+struct SegmentBuilder {
     /// The sections that belong to this program segment; currently only 2 (text + data)
     pub sections: [SectionBuilder; SegmentBuilder::NSECTIONS],
     /// A stupid offset value I need to refactor out
@@ -363,9 +379,9 @@ impl SegmentBuilder {
 
 /// A Mach-o object file container
 #[derive(Debug)]
-pub struct Mach<'a> {
+struct Mach<'a> {
     ctx: Ctx,
-    target: Target,
+    architecture: Architecture,
     symtab: SymbolTable,
     segment: SegmentBuilder,
     relocations: Relocations,
@@ -376,8 +392,7 @@ pub struct Mach<'a> {
 
 impl<'a> Mach<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
-        let target = artifact.target.clone();
-        let ctx = Ctx::from(target);
+        let ctx = make_ctx(&artifact.target);
         // FIXME: I believe we can avoid this partition by refactoring SegmentBuilder::new
         let (code, data): (Vec<_>, Vec<_>) = artifact.definitions().partition(|def| def.prop.function);
 
@@ -387,7 +402,7 @@ impl<'a> Mach<'a> {
 
         Mach {
             ctx,
-            target,
+            architecture: artifact.target.architecture,
             symtab,
             segment,
             relocations,
@@ -401,7 +416,7 @@ impl<'a> Mach<'a> {
         header.filetype = MH_OBJECT;
         // safe to divide up the sections into sub-sections via symbols for dead code stripping
         header.flags = MH_SUBSECTIONS_VIA_SYMBOLS;
-        header.cputype = CpuType::from(self.target).0;
+        header.cputype = CpuType::from(self.architecture).0;
         header.cpusubtype = 3;
         header.ncmds = 2;
         header.sizeofcmds = sizeofcmds as u32;
@@ -561,11 +576,9 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     vec![text_relocations]
 }
 
-impl<'a> Object for Mach<'a> {
-    fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
-        let mach = Mach::new(&artifact);
-        let mut buffer = Cursor::new(Vec::new());
-        mach.write(&mut buffer)?;
-        Ok(buffer.into_inner())
-    }
+pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
+    let mach = Mach::new(&artifact);
+    let mut buffer = Cursor::new(Vec::new());
+    mach.write(&mut buffer)?;
+    Ok(buffer.into_inner())
 }

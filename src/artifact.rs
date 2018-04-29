@@ -3,12 +3,14 @@
 use string_interner::DefaultStringInterner;
 use indexmap::IndexMap;
 use failure::Error;
+use targeting::{Triple, BinaryFormat};
 
 use std::io::Write;
 use std::fs::File;
 use std::collections::BTreeSet;
 
-use Target;
+use elf;
+use mach;
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -249,14 +251,14 @@ impl ImportKind {
 
 /// Builder for creating an artifact
 pub struct ArtifactBuilder {
-    target: Target,
+    target: Triple,
     name: Option<String>,
     library: bool,
 }
 
 impl ArtifactBuilder {
     /// Create a new Artifact with `target` machine architecture
-    pub fn new(target: Target) -> Self {
+    pub fn new(target: Triple) -> Self {
         ArtifactBuilder {
             target,
             name: None,
@@ -287,7 +289,7 @@ pub struct Artifact {
     /// The name of this artifact
     pub name: String,
     /// The machine target this is intended for
-    pub target: Target,
+    pub target: Triple,
     /// Whether this is a static library or not
     pub is_library: bool,
     // will keep this for now; may be useful to pre-partition code and data vectors, not sure
@@ -304,7 +306,7 @@ pub struct Artifact {
 // api less subject to change
 impl Artifact {
     /// Create a new binary Artifact, with `target` and optional `name`
-    pub fn new(target: Target, name: String) -> Self {
+    pub fn new(target: Triple, name: String) -> Self {
         Artifact {
             code: Vec::new(),
             data: Vec::new(),
@@ -486,25 +488,24 @@ impl Artifact {
         syms
     }
 
-    /// Emit a blob of bytes that represents this object file
-    pub fn emit<O: Object>(&self) -> Result<Vec<u8>, Error> {
+    /// Emit a blob of bytes representing the object file
+    pub fn emit(&self) -> Result<Vec<u8>, Error> {
         let undef = self.undefined_symbols();
         if undef.is_empty() {
-            O::to_bytes(self)
+            match self.target.binary_format {
+                BinaryFormat::Elf => elf::to_bytes(self),
+                BinaryFormat::Macho => mach::to_bytes(self),
+                _ => Err(format_err!("binary format {} is not supported", self.target.binary_format)),
+            }
         } else {
             Err(format_err!("the following symbols are declared but not defined: {:?}", undef))
         }
     }
 
-    /// Emit and write to disk a blob of bytes that represents this object file
-    pub fn write<O: Object>(&self, mut sink: File) -> Result<(), Error> {
-        let bytes = self.emit::<O>()?;
+    /// Emit and write to disk a blob of bytes representing the object file
+    pub fn write(&self, mut sink: File) -> Result<(), Error> {
+        let bytes = self.emit()?;
         sink.write_all(&bytes)?;
         Ok(())
     }
-}
-
-/// The interface for an object file which different binary container formats implement to marshall an artifact into a blob of bytes
-pub trait Object {
-    fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error>;
 }

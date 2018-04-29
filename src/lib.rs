@@ -6,19 +6,15 @@ extern crate string_interner;
 extern crate log;
 #[macro_use]
 extern crate failure;
+extern crate targeting;
 
 use goblin::container;
 
 type Ctx = container::Ctx;
 
 mod target;
-pub use target::Target;
-
-pub mod elf;
-pub use elf::Elf;
-
-pub mod mach;
-pub use mach::Mach;
+mod elf;
+mod mach;
 
 pub mod artifact;
-pub use artifact::{Object, Artifact, ArtifactBuilder, Link, ImportKind, Decl, RelocOverride};
+pub use artifact::{Artifact, ArtifactBuilder, Link, ImportKind, Decl, RelocOverride};
