@@ -1,6 +1,8 @@
 extern crate faerie;
 #[macro_use]
 extern crate targeting;
+#[cfg(test)]
+extern crate goblin;
 
 use faerie::*;
 use std::str::FromStr;
@@ -171,4 +173,33 @@ fn undefined_symbols() {
 
     obj.define("f", vec![4, 3, 2, 1]).expect("can define");
     assert!(obj.undefined_symbols().is_empty());
+}
+
+#[test]
+fn vary_output_formats() {
+    use targeting::BinaryFormat;
+    use goblin::Object;
+
+    let obj = Artifact::new(triple!("x86_64"), "t.o".into());
+    assert!(obj.emit().is_err());
+
+    let elf = obj.emit_as(BinaryFormat::Elf).unwrap();
+    match Object::parse(&elf).unwrap() {
+         Object::Elf(_) => {}
+         _ => panic!("emitted as ELF but didn't parse as ELF"),
+    }
+
+    let mach = obj.emit_as(BinaryFormat::Macho).unwrap();
+    match Object::parse(&mach).unwrap() {
+         Object::Mach(_) => {}
+         _ => panic!("emitted as MachO but didn't parse as MachO"),
+    }
+
+    /* TODO: Enable when COFF is supported.
+    let coff = obj.emit_as(BinaryFormat::Coff).unwrap();
+    match Object::parse(&coff).unwrap() {
+         Object::PE(_) => {}
+         _ => panic!("emitted as COFF but didn't parse as COFF"),
+    }
+    */
 }

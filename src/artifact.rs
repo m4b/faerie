@@ -488,23 +488,41 @@ impl Artifact {
         syms
     }
 
-    /// Emit a blob of bytes representing the object file
+    /// Emit a blob of bytes representing the object file in the format specified in the target the
+    /// `Artifact` was constructed with.
     pub fn emit(&self) -> Result<Vec<u8>, Error> {
+        self.emit_as(self.target.binary_format)
+    }
+
+    /// Emit a blob of bytes representing an object file in the given format.
+    pub fn emit_as(&self, format: BinaryFormat) -> Result<Vec<u8>, Error> {
         let undef = self.undefined_symbols();
         if undef.is_empty() {
-            match self.target.binary_format {
+            match format {
                 BinaryFormat::Elf => elf::to_bytes(self),
                 BinaryFormat::Macho => mach::to_bytes(self),
-                _ => Err(format_err!("binary format {} is not supported", self.target.binary_format)),
+                _ => Err(format_err!(
+                    "binary format {} is not supported",
+                    self.target.binary_format
+                )),
             }
         } else {
-            Err(format_err!("the following symbols are declared but not defined: {:?}", undef))
+            Err(format_err!(
+                "the following symbols are declared but not defined: {:?}",
+                undef
+            ))
         }
     }
 
-    /// Emit and write to disk a blob of bytes representing the object file
-    pub fn write(&self, mut sink: File) -> Result<(), Error> {
-        let bytes = self.emit()?;
+    /// Emit and write to disk a blob of bytes representing the object file in the format specified
+    /// in the target the `Artifact` was constructed with.
+    pub fn write(&self, sink: File) -> Result<(), Error> {
+        self.write_as(sink, self.target.binary_format)
+    }
+
+    /// Emit and write to disk a blob of bytes representing an object file in the given format.
+    pub fn write_as(&self, mut sink: File, format: BinaryFormat) -> Result<(), Error> {
+        let bytes = self.emit_as(format)?;
         sink.write_all(&bytes)?;
         Ok(())
     }
