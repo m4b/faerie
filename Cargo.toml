@@ -25,4 +25,4 @@ structopt = "0.2.3"
 structopt-derive = "0.2.3"
 string-interner = "0.6.3"
 failure = "0.1.1"
-targeting = { git = "https://github.com/cretonne/targeting" }
+target-lexicon = "0.0.0"

@@ -6,7 +6,7 @@ extern crate string_interner;
 extern crate log;
 #[macro_use]
 extern crate failure;
-extern crate targeting;
+extern crate target_lexicon;
 
 use goblin::container;
 

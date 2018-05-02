@@ -2,7 +2,7 @@
 
 use container;
 use Ctx;
-use targeting::{Triple, PointerWidth, Endianness};
+use target_lexicon::{Triple, PointerWidth, Endianness};
 
 pub fn make_ctx(target: &Triple) -> Ctx {
     let container_size = match target.pointer_width() {

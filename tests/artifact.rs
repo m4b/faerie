@@ -1,6 +1,6 @@
 extern crate faerie;
 #[macro_use]
-extern crate targeting;
+extern crate target_lexicon;
 #[cfg(test)]
 extern crate goblin;
 
@@ -177,7 +177,7 @@ fn undefined_symbols() {
 
 #[test]
 fn vary_output_formats() {
-    use targeting::BinaryFormat;
+    use target_lexicon::BinaryFormat;
     use goblin::Object;
 
     let obj = Artifact::new(triple!("x86_64"), "t.o".into());

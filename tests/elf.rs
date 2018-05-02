@@ -2,7 +2,7 @@ extern crate faerie;
 extern crate scroll;
 extern crate goblin;
 #[macro_use]
-extern crate targeting;
+extern crate target_lexicon;
 
 use std::str::FromStr;
 

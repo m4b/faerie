@@ -3,7 +3,7 @@
 use string_interner::DefaultStringInterner;
 use indexmap::IndexMap;
 use failure::Error;
-use targeting::{Triple, BinaryFormat};
+use target_lexicon::{Triple, BinaryFormat};
 
 use std::io::Write;
 use std::fs::File;

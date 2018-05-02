@@ -4,11 +4,11 @@ extern crate structopt;
 #[macro_use]
 extern crate structopt_derive;
 extern crate failure;
-extern crate targeting;
+extern crate target_lexicon;
 
 use structopt::StructOpt;
 use failure::Error;
-use targeting::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
+use target_lexicon::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
 
 use faerie::{Link, ArtifactBuilder, Decl};
 use std::path::Path;

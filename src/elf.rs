@@ -13,7 +13,7 @@ use std::io::SeekFrom::*;
 use scroll::IOwrite;
 use string_interner::DefaultStringInterner;
 use indexmap::IndexMap;
-use targeting::Architecture;
+use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
 use goblin::elf::section_header::{SectionHeader};
@@ -31,7 +31,7 @@ struct MachineTag(u16);
 
 impl From<Architecture> for MachineTag {
     fn from(architecture: Architecture) -> MachineTag {
-        use targeting::Architecture::*;
+        use target_lexicon::Architecture::*;
         use goblin::elf::header::*;
         MachineTag(match architecture {
             X86_64 => EM_X86_64,

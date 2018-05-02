@@ -12,7 +12,7 @@ use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
 use scroll::{Pwrite, IOwrite};
 use scroll::ctx::SizeWith;
-use targeting::Architecture;
+use target_lexicon::Architecture;
 
 use goblin::mach::cputype;
 use goblin::mach::segment::{Section, Segment};
@@ -25,7 +25,7 @@ struct CpuType(cputype::CpuType);
 
 impl From<Architecture> for CpuType {
     fn from(architecture: Architecture) -> CpuType {
-        use targeting::Architecture::*;
+        use target_lexicon::Architecture::*;
         use mach::cputype::*;
         CpuType(match architecture {
             X86_64 => CPU_TYPE_X86_64,
