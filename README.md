@@ -5,7 +5,7 @@ Emit some object files, at your leisure:
 ```rust
 let name = "test.o";
 let file = File::create(Path::new(name))?;
-let mut obj = ArtifactBuilder::new(Target::X86_64)
+let mut obj = ArtifactBuilder::new(triple!("x86_64-unknown-unknown-unknown-elf"))
     .name(name)
     .finish();
 
@@ -74,8 +74,8 @@ obj.link(Link { from: "main", to: "printf", at: 29 })?;
 obj.link(Link { from: "main", to: "deadbeef", at: 10 })?;
 obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 7 })?;
 
-// Finally, we write which object file we desire
-obj.write::<Elf>(file)?;
+// Finally, we write the object file
+obj.write(file)?;
 ```
 
 Will emit an object file like this:

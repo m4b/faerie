@@ -2,8 +2,9 @@
 
 use goblin;
 use failure::Error;
-use {artifact, Artifact, Decl, Object, Target, Ctx, ImportKind};
+use {artifact, Artifact, Decl, Ctx, ImportKind};
 use artifact::LinkAndDecl;
+use target::make_ctx;
 
 use std::collections::{HashMap, hash_map};
 use std::fmt;
@@ -12,6 +13,7 @@ use std::io::SeekFrom::*;
 use scroll::IOwrite;
 use string_interner::DefaultStringInterner;
 use indexmap::IndexMap;
+use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
 use goblin::elf::section_header::{SectionHeader};
@@ -27,22 +29,47 @@ type Section = SectionHeader;
 
 struct MachineTag(u16);
 
-impl From<Target> for MachineTag {
-    fn from(target: Target) -> MachineTag {
-        use self::Target::*;
-        use goblin::elf::header::{EM_NONE, EM_386, EM_X86_64, EM_ARM, EM_AARCH64};
-        MachineTag(match target {
+impl From<Architecture> for MachineTag {
+    fn from(architecture: Architecture) -> MachineTag {
+        use target_lexicon::Architecture::*;
+        use goblin::elf::header::*;
+        MachineTag(match architecture {
             X86_64 => EM_X86_64,
-            X86 => EM_386,
-            ARM64 => EM_AARCH64,
-            ARMv7 => EM_ARM,
-            Unknown => EM_NONE
+            I386 |
+            I586 |
+            I686 => EM_386,
+            Aarch64 => EM_AARCH64,
+            Arm |
+            Armv4t |
+            Armv5te |
+            Armv7 |
+            Armv7s |
+            Thumbv6m |
+            Thumbv7em |
+            Thumbv7m => EM_ARM,
+            Mips |
+            Mipsel |
+            Mips64 |
+            Mips64el => EM_MIPS,
+            Powerpc => EM_PPC,
+            Powerpc64 |
+            Powerpc64le => EM_PPC64,
+            Riscv32 |
+            Riscv64 => EM_RISCV,
+            S390x => EM_S390,
+            Sparc => EM_SPARC,
+            Sparc64 |
+            Sparcv9 => EM_SPARCV9,
+            Msp430 => EM_MSP430,
+            Unknown => EM_NONE,
+            Asmjs => panic!("asm.js does not exist in ELF"),
+            Wasm32 => panic!("wasm32 does not exist in ELF"),
         })
     }
 }
 
 /// The kind of symbol this is; used in [SymbolBuilder](struct.SymbolBuilder.html)
-pub enum SymbolType {
+enum SymbolType {
     /// A function
     Function,
     /// A data object
@@ -58,7 +85,7 @@ pub enum SymbolType {
 }
 
 /// A builder for creating a 32/64 bit ELF symbol
-pub struct SymbolBuilder {
+struct SymbolBuilder {
     name_offset: usize,
     global: bool,
     size: u64,
@@ -136,7 +163,7 @@ impl SymbolBuilder {
 }
 
 /// The kind of section this can be; used in [SectionBuilder](struct.SectionBuilder.html)
-pub enum SectionType {
+enum SectionType {
     Bits,
     Data,
     String,
@@ -147,7 +174,7 @@ pub enum SectionType {
 }
 
 /// A builder for creating a 32/64 bit section
-pub struct SectionBuilder {
+struct SectionBuilder {
     typ: SectionType,
     exec: bool,
     write: bool,
@@ -243,7 +270,7 @@ impl SectionBuilder {
 
 // r_offset: 17 r_typ: 4 r_sym: 12 r_addend: fffffffffffffffc rela: true,
 /// A builder for constructing a cross platform relocation
-pub struct RelocationBuilder {
+struct RelocationBuilder {
     rel: bool,
     addend: isize,
     sym_idx: usize,
@@ -293,7 +320,7 @@ impl RelocationBuilder {
 
 //#[derive(Debug)]
 /// An intermediate ELF object file container
-pub struct Elf<'a> {
+struct Elf<'a> {
     name: &'a str,
     code: IndexMap<StringIndex, &'a [u8]>,
     relocations: IndexMap<StringIndex, (Section, Vec<Relocation>)>,
@@ -308,7 +335,7 @@ pub struct Elf<'a> {
     sizeof_bits: Offset,
     nsections: u16,
     ctx: Ctx,
-    target: Target,
+    architecture: Architecture,
     nlocals: usize,
 }
 
@@ -334,7 +361,7 @@ const SYMTAB_LINK: u16 = 2;
 
 impl<'a> Elf<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
-        let ctx = Ctx::from(artifact.target.clone());
+        let ctx = make_ctx(&artifact.target);
         let mut offsets = HashMap::new();
         let mut strings = DefaultStringInterner::default();
         let mut special_symbols = Vec::new();
@@ -377,7 +404,7 @@ impl<'a> Elf<'a> {
             sizeof_strtab,
             sizeof_bits,
             ctx,
-            target: artifact.target.clone(),
+            architecture: artifact.target.architecture,
             nlocals: 0,
         }
     }
@@ -557,7 +584,7 @@ impl<'a> Elf<'a> {
         // Header
         /////////////////////////////////////
         let mut header = Header::new(self.ctx);
-        let machine: MachineTag = self.target.clone().into();
+        let machine: MachineTag = self.architecture.into();
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
@@ -687,24 +714,22 @@ impl<'a> Elf<'a> {
     }
 }
 
-impl<'a> Object for Elf<'a> {
-    fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
-        // TODO: make new fully construct the elf object, e.g., the definitions, imports, and links don't take self
-        // this means that a call to new has a fully constructed object ready to marshal into bytes, similar to the mach backend
-        let mut elf = Elf::new(&artifact);
-        for def in artifact.definitions() {
-            debug!("Def: {:?}", def);
-            elf.add_definition(def.name, def.data, def.prop);
-        }
-        for (ref import, ref kind) in artifact.imports() {
-            debug!("Import: {:?} -> {:?}", import, kind);
-            elf.import(import.to_string(), kind);
-        }
-        for link in artifact.links() {
-            elf.link(&link);
-        }
-        let mut buffer = Cursor::new(Vec::new());
-        elf.write(&mut buffer)?;
-        Ok(buffer.into_inner())
+pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
+    // TODO: make new fully construct the elf object, e.g., the definitions, imports, and links don't take self
+    // this means that a call to new has a fully constructed object ready to marshal into bytes, similar to the mach backend
+    let mut elf = Elf::new(&artifact);
+    for def in artifact.definitions() {
+        debug!("Def: {:?}", def);
+        elf.add_definition(def.name, def.data, def.prop);
     }
+    for (ref import, ref kind) in artifact.imports() {
+        debug!("Import: {:?} -> {:?}", import, kind);
+        elf.import(import.to_string(), kind);
+    }
+    for link in artifact.links() {
+        elf.link(&link);
+    }
+    let mut buffer = Cursor::new(Vec::new());
+    elf.write(&mut buffer)?;
+    Ok(buffer.into_inner())
 }

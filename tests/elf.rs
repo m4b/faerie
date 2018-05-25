@@ -1,19 +1,23 @@
 extern crate faerie;
 extern crate scroll;
 extern crate goblin;
+#[macro_use]
+extern crate target_lexicon;
 
-use faerie::{Artifact, Decl, Target, Link};
+use std::str::FromStr;
+
+use faerie::{Artifact, Decl, Link};
 use goblin::elf::*;
 
 #[test]
 // This test is for a known bug (issue #31).
 fn file_name_is_same_as_symbol_name_issue_31() {
     const NAME: &str = "a";
-    let mut obj = Artifact::new(Target::X86_64, "a".into());
+    let mut obj = Artifact::new(triple!("x86_64-unknown-unknown-unknown-elf"), "a".into());
     obj.declare(NAME, Decl::Function { global: true }).expect("can declare");
     obj.define(NAME, vec![1, 2, 3, 4]).expect("can define");
     println!("\n{:#?}", obj);
-    let bytes = obj.emit::<faerie::Elf>().expect("can emit elf file");
+    let bytes = obj.emit().expect("can emit elf file");
     let bytes = bytes.as_slice();
     println!("{:?}", bytes);
 
@@ -45,7 +49,7 @@ fn file_name_is_same_as_symbol_name_issue_31() {
 // Regression test for issue 30: previously, if a non-import symbol was declared but not defined,
 // the elf emit function would panic
 fn link_symbol_pair_panic_issue_30() {
-    let mut obj = Artifact::new(Target::X86_64, "t.o".into());
+    let mut obj = Artifact::new(triple!("x86_64-unknown-unknown-unknown-elf"), "t.o".into());
 
     obj.declare("a", Decl::Function { global: true }).expect("can declare a");
     obj.declare_with("b", Decl::Function { global: true }, vec![1, 2, 3, 4]).expect("can declare and define b");
@@ -61,5 +65,5 @@ fn link_symbol_pair_panic_issue_30() {
 
     // The `emit` method will check that there are undefined symbols
     // and return an error describing them:
-    assert!(obj.emit::<faerie::Elf>().is_err());
+    assert!(obj.emit().is_err());
 }

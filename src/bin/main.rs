@@ -4,11 +4,13 @@ extern crate structopt;
 #[macro_use]
 extern crate structopt_derive;
 extern crate failure;
+extern crate target_lexicon;
 
 use structopt::StructOpt;
 use failure::Error;
+use target_lexicon::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
 
-use faerie::{Link, Elf, Mach, Target, ArtifactBuilder, Decl};
+use faerie::{Link, ArtifactBuilder, Decl};
 use std::path::Path;
 use std::fs::File;
 use std::env;
@@ -51,7 +53,18 @@ pub struct Args {
 
 fn run (args: Args) -> Result<(), Error> {
     let file = File::create(Path::new(&args.filename))?;
-    let mut obj = ArtifactBuilder::new(Target::X86_64)
+    let target = Triple {
+        architecture: Architecture::X86_64,
+        vendor: Vendor::Unknown,
+        operating_system: OperatingSystem::Unknown,
+        environment: Environment::Unknown,
+        binary_format: if args.mach {
+            BinaryFormat::Macho
+        } else {
+            BinaryFormat::Elf
+        },
+    };
+    let mut obj = ArtifactBuilder::new(target)
         .name(args.filename.clone())
         .library(args.library)
         .finish();
@@ -121,13 +134,8 @@ fn run (args: Args) -> Result<(), Error> {
     obj.link(Link { from: "main", to: "deadbeef", at: 10 })?;
     obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 7 })?;
 
-    // Finally, we write which object file we desire
-    if args.mach {
-        obj.write::<Mach>(file)?;
-    } else {
-        obj.write::<Elf>(file)?;
-        println!("res: {:#?}", obj);
-    }
+    // Finally, we the object file
+    obj.write(file)?;
     if let Some(output) = args.link {
         link(&args.filename, &output, &args.linkline)?;
     }
@@ -136,7 +144,18 @@ fn run (args: Args) -> Result<(), Error> {
 
 fn deadbeef (args: Args) -> Result<(), Error> {
     let file = File::create(Path::new(&args.filename))?;
-    let mut obj = ArtifactBuilder::new(Target::X86_64)
+    let target = Triple {
+        architecture: Architecture::X86_64,
+        vendor: Vendor::Unknown,
+        operating_system: OperatingSystem::Unknown,
+        environment: Environment::Unknown,
+        binary_format: if args.mach {
+            BinaryFormat::Macho
+        } else {
+            BinaryFormat::Elf
+        },
+    };
+    let mut obj = ArtifactBuilder::new(target)
         .name(args.filename.clone())
         .library(args.library)
         .finish();
@@ -146,12 +165,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
     obj.declare("DEADBEEF", Decl::Data { global: true, writeable: false })?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
-    if args.mach {
-        obj.write::<Mach>(file)?;
-    } else {
-        obj.write::<Elf>(file)?;
-        println!("res: {:#?}", obj);
-    }
+    obj.write(file)?;
     if let Some(output) = args.link {
         link(&args.filename, &output, &args.linkline)?;
     }
