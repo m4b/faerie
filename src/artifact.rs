@@ -24,7 +24,7 @@ pub struct RelocOverride {
 }
 
 type StringID = usize;
-type Relocation = (StringID, StringID, usize, Option<RelocOverride>);
+type Relocation = (StringID, StringID, u64, Option<RelocOverride>);
 
 /// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
@@ -194,7 +194,7 @@ pub struct Binding<'a> {
 pub struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
-    pub at: usize,
+    pub at: u64,
     pub reloc: Option<RelocOverride>,
 }
 
@@ -223,7 +223,7 @@ pub struct Link<'a> {
     /// The relocation is `to` this symbol
     pub to: &'a str,
     /// The byte offset _relative_ to `from` where the relocation should be performed
-    pub at: usize,
+    pub at: u64,
 }
 
 /// The kind of import this is - either a function, or a copy relocation of data from a shared library
