@@ -52,7 +52,7 @@ impl From<Architecture> for CpuType {
 }
 
 type SectionIndex = usize;
-type StrtableOffset = usize;
+type StrtableOffset = u64;
 
 const CODE_SECTION_INDEX: SectionIndex = 0;
 const DATA_SECTION_INDEX: SectionIndex = 1;
@@ -64,7 +64,7 @@ struct SymbolBuilder {
     section: Option<SectionIndex>,
     global: bool,
     import: bool,
-    offset: usize,
+    offset: u64,
 }
 
 impl SymbolBuilder {
@@ -86,10 +86,10 @@ impl SymbolBuilder {
     pub fn global(mut self, global: bool) -> Self {
         self.global = global; self
     }
-    pub fn offset(mut self, offset: usize) -> Self {
+    pub fn offset(mut self, offset: u64) -> Self {
         self.offset = offset; self
     }
-    pub fn get_offset(&self) -> usize {
+    pub fn get_offset(&self) -> u64 {
         self.offset
     }
     /// Is this symbol an import?
@@ -103,7 +103,7 @@ impl SymbolBuilder {
         let n_strx = self.name;
         let mut n_sect = 0;
         let mut n_type = N_UNDF;
-        let mut n_value = self.offset as u64;
+        let mut n_value = self.offset;
         let n_desc = 0;
         if self.global {
             n_type |= N_EXT;
@@ -125,7 +125,7 @@ impl SymbolBuilder {
         }
 
         Nlist {
-            n_strx,
+            n_strx: n_strx as usize,
             n_type,
             n_sect,
             n_desc,
@@ -141,14 +141,14 @@ type SymbolIndex = usize;
 #[derive(Debug)]
 struct RelocationBuilder {
     symbol: SymbolIndex,
-    relocation_offset: usize,
+    relocation_offset: u64,
     absolute: bool,
     r_type: RelocType,
 }
 
 impl RelocationBuilder {
     /// Create a relocation for `symbol`, starting at `relocation_offset`
-    pub fn new(symbol: SymbolIndex, relocation_offset: usize, r_type: RelocType) -> Self {
+    pub fn new(symbol: SymbolIndex, relocation_offset: u64, r_type: RelocType) -> Self {
         RelocationBuilder {
             symbol,
             relocation_offset,
@@ -180,17 +180,17 @@ impl RelocationBuilder {
 /// Helper to build sections
 #[derive(Debug, Clone)]
 struct SectionBuilder {
-    addr: usize,
-    align: usize,
-    offset: usize,
-    size: usize,
+    addr: u64,
+    align: u64,
+    offset: u64,
+    size: u64,
     sectname: &'static str,
     segname: &'static str,
 }
 
 impl SectionBuilder {
     /// Create a new section builder with `sectname`, `segname` and `size`
-    pub fn new(sectname: &'static str, segname: &'static str, size: usize) -> Self {
+    pub fn new(sectname: &'static str, segname: &'static str, size: u64) -> Self {
         SectionBuilder {
             addr: 0,
             align: 4,
@@ -201,15 +201,15 @@ impl SectionBuilder {
         }
     }
     /// Set the vm address of this section
-    pub fn addr(mut self, addr: usize) -> Self {
+    pub fn addr(mut self, addr: u64) -> Self {
         self.addr = addr; self
     }
     /// Set the file offset of this section
-    pub fn offset(mut self, offset: usize) -> Self {
+    pub fn offset(mut self, offset: u64) -> Self {
         self.offset = offset; self
     }
     /// Set the alignment of this section
-    pub fn align(mut self, align: usize) -> Self {
+    pub fn align(mut self, align: u64) -> Self {
         self.align = align; self
     }
     /// Finalize and create the actual Mach-o section
@@ -221,8 +221,8 @@ impl SectionBuilder {
         Section {
             sectname,
             segname,
-            addr: self.addr as u64,
-            size: self.size as u64,
+            addr: self.addr,
+            size: self.size,
             offset: self.offset as u32,
             align: self.align as u32,
             // FIXME, client needs to set after all offsets known
@@ -253,7 +253,7 @@ struct SymbolTable {
 /// The kind of symbol this is
 enum SymbolType {
     /// Which `section` this is defined in, and at what `offset`
-    Defined { section: SectionIndex, offset: usize, global: bool },
+    Defined { section: SectionIndex, offset: u64, global: bool },
     /// An undefined symbol (an import)
     Undefined,
 }
@@ -276,11 +276,11 @@ impl SymbolTable {
         self.symbols.len()
     }
     /// Returns size of the string table, in bytes
-    pub fn sizeof_strtable(&self) -> usize {
+    pub fn sizeof_strtable(&self) -> u64 {
         self.strtable_size
     }
     /// Lookup this symbols offset in the segment
-    pub fn offset(&self, symbol_name: &str) -> Option<usize> {
+    pub fn offset(&self, symbol_name: &str) -> Option<u64> {
         self.strtable.get(symbol_name)
          .and_then(|idx| self.symbols.get(&idx))
          .and_then(|sym| Some(sym.get_offset()))
@@ -296,7 +296,7 @@ impl SymbolTable {
         //let name = format!("_{}", symbol_name);
         let name = symbol_name;
         // 1 for null terminator and 1 for _ prefix (defered until write time);
-        let name_len = name.len() + 1 + 1;
+        let name_len = name.len() as u64 + 1 + 1;
         let last_index = self.strtable.len();
         let name_index = self.strtable.get_or_intern(name);
         debug!("{}: {} <= {}", symbol_name, last_index, name_index);
@@ -324,30 +324,30 @@ struct SegmentBuilder {
     /// The sections that belong to this program segment; currently only 2 (text + data)
     pub sections: [SectionBuilder; SegmentBuilder::NSECTIONS],
     /// A stupid offset value I need to refactor out
-    pub offset: usize,
-    size: usize,
+    pub offset: u64,
+    size: u64,
 }
 
 impl SegmentBuilder {
     pub const NSECTIONS: usize = 2;
     /// The size of this segment's _data_, in bytes
-    pub fn size(&self) -> usize {
+    pub fn size(&self) -> u64 {
         self.size
     }
     /// The size of this segment's _load command_, including its associated sections, in bytes
-    pub fn load_command_size(ctx: &Ctx) -> usize {
-        Segment::size_with(&ctx) + (Self::NSECTIONS * Section::size_with(&ctx))
+    pub fn load_command_size(ctx: &Ctx) -> u64 {
+        Segment::size_with(&ctx) as u64 + (Self::NSECTIONS as u64 * Section::size_with(&ctx) as u64)
     }
-    fn _section_data_file_offset(ctx: &Ctx) -> usize {
+    fn _section_data_file_offset(ctx: &Ctx) -> u64 {
         // section data
-        Header::size_with(&ctx.container) + Self::load_command_size(ctx)
+        Header::size_with(&ctx.container) as u64 + Self::load_command_size(ctx)
     }
-    fn build_section(symtab: &mut SymbolTable, sectname: &'static str, segname: &'static str, offset: &mut usize, addr: &mut usize, symbol_offset: &mut usize, section: SectionIndex, definitions: &[Definition]) -> SectionBuilder {
+    fn build_section(symtab: &mut SymbolTable, sectname: &'static str, segname: &'static str, offset: &mut u64, addr: &mut u64, symbol_offset: &mut u64, section: SectionIndex, definitions: &[Definition]) -> SectionBuilder {
         let mut local_size = 0;
         for def in definitions {
-            local_size += def.data.len();
+            local_size += def.data.len() as u64;
             symtab.insert(def.name, SymbolType::Defined { section, offset: *symbol_offset, global: def.prop.global });
-            *symbol_offset += def.data.len();
+            *symbol_offset += def.data.len() as u64;
         }
         let section = SectionBuilder::new(sectname, segname, local_size).offset(*offset).addr(*addr);
         *offset += local_size;
@@ -357,7 +357,7 @@ impl SegmentBuilder {
     /// Create a new program segment from an `artifact`, symbol table, and context
     // FIXME: this is pub(crate) for now because we can't leak pub(crate) Definition
     pub(crate) fn new(artifact: &Artifact, code: &[Definition], data: &[Definition], symtab: &mut SymbolTable, ctx: &Ctx) -> Self {
-        let mut offset = Header::size_with(&ctx.container);
+        let mut offset = Header::size_with(&ctx.container) as u64;
         let mut size = 0;
         let mut symbol_offset = 0;
         let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code);
@@ -411,7 +411,7 @@ impl<'a> Mach<'a> {
             data,
         }
     }
-    fn header(&self, sizeofcmds: usize) -> Header {
+    fn header(&self, sizeofcmds: u64) -> Header {
         let mut header = Header::new(&self.ctx);
         header.filetype = MH_OBJECT;
         // safe to divide up the sections into sub-sections via symbols for dead code stripping
@@ -428,11 +428,11 @@ impl<'a> Mach<'a> {
         // construct symtab command
         let mut symtab_load_command = SymtabCommand::new();
         let segment_load_command_size = SegmentBuilder::load_command_size(&self.ctx);
-        let sizeof_load_commands = segment_load_command_size + symtab_load_command.cmdsize as usize;
+        let sizeof_load_commands = segment_load_command_size + symtab_load_command.cmdsize as u64;
         let symtable_offset = self.segment.offset + sizeof_load_commands;
-        let strtable_offset = symtable_offset + (self.symtab.len() * Nlist::size_with(&self.ctx));
+        let strtable_offset = symtable_offset + (self.symtab.len() as u64 * Nlist::size_with(&self.ctx) as u64);
         let relocation_offset_start = strtable_offset + self.symtab.sizeof_strtable();
-        let first_section_offset = Header::size_with(&self.ctx) + sizeof_load_commands;
+        let first_section_offset = Header::size_with(&self.ctx) as u64 + sizeof_load_commands;
         // start with setting the headers dependent value
         let header = self.header(sizeof_load_commands);
         
@@ -444,7 +444,7 @@ impl<'a> Mach<'a> {
         for (idx, section) in self.segment.sections.into_iter().cloned().enumerate() {
             let mut section: Section = section.create();
             section.offset = section_offset as u32;
-            section_offset += section.size as usize;
+            section_offset += section.size;
             debug!("{}: Setting nrelocs", idx);
             // relocations are tied to segment/sections
             // TODO: move this also into SegmentBuilder
@@ -452,7 +452,7 @@ impl<'a> Mach<'a> {
                 let nrelocs = self.relocations[idx].len();
                 section.nreloc = nrelocs as _;
                 section.reloff = relocation_offset as u32;
-                relocation_offset += nrelocs * SIZEOF_RELOCATION_INFO;
+                relocation_offset += nrelocs as u64 * SIZEOF_RELOCATION_INFO as u64;
             }
             debug!("Section: {:#?}", section);
             raw_sections.iowrite_with(section, self.ctx)?;
@@ -465,13 +465,13 @@ impl<'a> Mach<'a> {
         // FIXME: de-magic number these
         segment_load_command.initprot = 7;
         segment_load_command.maxprot = 7;
-        segment_load_command.filesize = self.segment.size() as u64;
+        segment_load_command.filesize = self.segment.size();
         segment_load_command.vmsize = segment_load_command.filesize;
-        segment_load_command.fileoff = first_section_offset as u64;
+        segment_load_command.fileoff = first_section_offset;
         debug!("Segment: {:#?}", segment_load_command);
 
         debug!("Symtable Offset: {:#?}", symtable_offset);
-        assert_eq!(symtable_offset, self.segment.offset + segment_load_command.cmdsize as usize + symtab_load_command.cmdsize as usize);
+        assert_eq!(symtable_offset, self.segment.offset + segment_load_command.cmdsize as u64 + symtab_load_command.cmdsize as u64);
         symtab_load_command.nsyms = self.symtab.len() as u32;
         symtab_load_command.symoff = symtable_offset as u32;
         symtab_load_command.stroff = strtable_offset as u32;

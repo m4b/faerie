@@ -271,10 +271,9 @@ impl SectionBuilder {
 // r_offset: 17 r_typ: 4 r_sym: 12 r_addend: fffffffffffffffc rela: true,
 /// A builder for constructing a cross platform relocation
 struct RelocationBuilder {
-    rel: bool,
-    addend: isize,
+    addend: Option<i64>,
     sym_idx: usize,
-    offset: usize,
+    offset: u64,
     typ: u32,
 }
 
@@ -282,8 +281,7 @@ impl RelocationBuilder {
     /// Create a new relocation with `typ`
     pub fn new(typ: u32) -> Self {
         RelocationBuilder {
-            rel: false,
-            addend: 0,
+            addend: Some(0),
             offset: 0,
             sym_idx: 0,
             typ,
@@ -291,15 +289,14 @@ impl RelocationBuilder {
     }
     /// Set this relocation to a relocation without an addend
     pub fn rel(mut self) -> Self {
-        self.rel = true; self
+        self.addend = None; self
     }
-    /// Set this relocation's addend to `addend`, which also forces `rel = false`
-    pub fn addend(mut self, addend: isize) -> Self {
-        self.rel = false;
-        self.addend = addend; self
+    /// Set this relocation to a relocation with an addend of `addend`.
+    pub fn addend(mut self, addend: i64) -> Self {
+        self.addend = Some(addend); self
     }
     /// Set the section relative offset this relocation refers to
-    pub fn offset(mut self, offset: usize) -> Self {
+    pub fn offset(mut self, offset: u64) -> Self {
         self.offset = offset; self
     }
     /// Set the symbol index this relocation affects
@@ -313,7 +310,6 @@ impl RelocationBuilder {
             r_addend: self.addend,
             r_sym: self.sym_idx,
             r_type: self.typ,
-            is_rela: !self.rel,
         }
     }
 }
@@ -503,7 +499,7 @@ impl<'a> Elf<'a> {
             (from_idx, to_idx)
         };
         let (reloc, addend) = if let Some(ovr) = l.reloc {
-            (ovr.reloc, ovr.addend as isize)
+            (ovr.reloc, i64::from(ovr.addend))
         } else {
             match *l.from.decl {
                 Decl::Function {..} => {
@@ -543,7 +539,7 @@ impl<'a> Elf<'a> {
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize) {
         debug!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
-        let reloc_size = Relocation::size(reloc.is_rela, self.ctx) as u64;
+        let reloc_size = Relocation::size(reloc.r_addend.is_some(), self.ctx) as u64;
         if self.relocations.contains_key(&idx) {
             debug!("{} has relocs", relocee);
             let &mut (ref mut section, ref mut relocs) = self.relocations.get_mut(&idx).unwrap();
@@ -680,7 +676,7 @@ impl<'a> Elf<'a> {
             section_headers.push(section);
             for relocation in relocations.drain(..) {
                 debug!("Relocation: {:?}", relocation);
-                file.iowrite_with(relocation, (relocation.is_rela, self.ctx))?;
+                file.iowrite_with(relocation, (relocation.r_addend.is_some(), self.ctx))?;
             }
         }
         let after_relocs = file.seek(Current(0))?;
