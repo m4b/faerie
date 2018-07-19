@@ -103,7 +103,7 @@ impl SymbolBuilder {
         let n_strx = self.name;
         let mut n_sect = 0;
         let mut n_type = N_UNDF;
-        let mut n_value = self.offset as u64;
+        let mut n_value = self.offset;
         let n_desc = 0;
         if self.global {
             n_type |= N_EXT;
@@ -221,8 +221,8 @@ impl SectionBuilder {
         Section {
             sectname,
             segname,
-            addr: self.addr as u64,
-            size: self.size as u64,
+            addr: self.addr,
+            size: self.size,
             offset: self.offset as u32,
             align: self.align as u32,
             // FIXME, client needs to set after all offsets known
@@ -465,9 +465,9 @@ impl<'a> Mach<'a> {
         // FIXME: de-magic number these
         segment_load_command.initprot = 7;
         segment_load_command.maxprot = 7;
-        segment_load_command.filesize = self.segment.size() as u64;
+        segment_load_command.filesize = self.segment.size();
         segment_load_command.vmsize = segment_load_command.filesize;
-        segment_load_command.fileoff = first_section_offset as u64;
+        segment_load_command.fileoff = first_section_offset;
         debug!("Segment: {:#?}", segment_load_command);
 
         debug!("Symtable Offset: {:#?}", symtable_offset);
