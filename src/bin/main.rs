@@ -163,7 +163,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
     // gold complains though:
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
-    obj.declare("DEADBEEF", Decl::Data { global: true, writeable: false })?;
+    obj.declare("DEADBEEF", Decl::Data { global: true, writable: false })?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
     obj.write(file)?;
     if let Some(output) = args.link {
