@@ -20,7 +20,7 @@ fn duplicate_declarations_are_ok() {
         "str.0",
         faerie::Decl::Data {
             global: false,
-            writeable: false,
+            writable: false,
         },
     ).expect("declare should be compatible");
 
@@ -36,7 +36,7 @@ fn duplicate_declarations_are_ok() {
                 "str.0",
                 faerie::Decl::Data {
                     global: true,
-                    writeable: false,
+                    writable: false,
                 }
             ),
             ("str.0", faerie::Decl::DataImport),
@@ -45,7 +45,7 @@ fn duplicate_declarations_are_ok() {
                 "str.0",
                 faerie::Decl::Data {
                     global: true,
-                    writeable: false,
+                    writable: false,
                 }
             ),
 
@@ -72,7 +72,7 @@ fn multiple_different_declarations_are_not_ok() {
             "f",
             faerie::Decl::Data {
                 global: false,
-                writeable: false,
+                writable: false,
             },
         ).is_err()
     );

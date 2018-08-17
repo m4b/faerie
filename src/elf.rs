@@ -203,9 +203,9 @@ impl SectionBuilder {
     pub fn alloc(mut self) -> Self {
         self.alloc = true; self
     }
-    /// Make this section writeable
-    pub fn writeable(mut self, writeable:bool) -> Self {
-        self.write = writeable; self
+    /// Make this section writable
+    pub fn writable(mut self, writable:bool) -> Self {
+        self.write = writable; self
     }
 
     /// Set the byte offset of this section's name in the corresponding strtab
@@ -466,7 +466,7 @@ impl<'a> Elf<'a> {
             let tmp = SectionBuilder::new(size as u64)
                 .name_offset(section_offset)
                 .section_type(stype)
-                .alloc().writeable(prop.writeable);
+                .alloc().writable(prop.writable);
 
             // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
             if prop.function { tmp.exec().create(&self.ctx) } else { tmp.create(&self.ctx) }

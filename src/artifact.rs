@@ -62,7 +62,7 @@ pub enum ArtifactError {
 pub struct Prop {
     pub global: bool,
     pub function: bool,
-    pub writeable: bool,
+    pub writable: bool,
     pub cstring: bool,
 }
 
@@ -85,7 +85,7 @@ pub enum Decl {
     /// A function defined in this artifact
     Function { global: bool },
     /// A data object defined in this artifact
-    Data { global: bool, writeable: bool },
+    Data { global: bool, writable: bool },
     /// A null-terminated string object defined in this artifact
     CString { global: bool }
 }
@@ -415,9 +415,9 @@ impl Artifact {
                     return Err(ArtifactError::DuplicateDefinition(name.as_ref().to_string()));
                 }
                 let prop = match stype.decl {
-                    Decl::CString { global } => Prop { global, function: false, writeable: false, cstring: true },
-                    Decl::Data { global, writeable } => Prop { global, function: false, writeable, cstring: false },
-                    Decl::Function { global } => Prop { global, function: true, writeable: false, cstring: false},
+                    Decl::CString { global } => Prop { global, function: false, writable: false, cstring: true },
+                    Decl::Data { global, writable } => Prop { global, function: false, writable, cstring: false },
+                    Decl::Function { global } => Prop { global, function: true, writable: false, cstring: false},
                     _ if stype.decl.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
