@@ -20,6 +20,7 @@ use goblin::mach::load_command::SymtabCommand;
 use goblin::mach::header::{Header, MH_OBJECT, MH_SUBSECTIONS_VIA_SYMBOLS};
 use goblin::mach::symbols::Nlist;
 use goblin::mach::relocation::{RelocationInfo, RelocType, SIZEOF_RELOCATION_INFO};
+use goblin::mach::constants::{S_REGULAR, S_CSTRING_LITERALS, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS};
 
 struct CpuType(cputype::CpuType);
 
@@ -56,6 +57,7 @@ type StrtableOffset = u64;
 
 const CODE_SECTION_INDEX: SectionIndex = 0;
 const DATA_SECTION_INDEX: SectionIndex = 1;
+const CSTRING_SECTION_INDEX: SectionIndex = 2;
 
 /// A builder for creating a 32/64 bit Mach-o Nlist symbol
 #[derive(Debug)]
@@ -65,6 +67,7 @@ struct SymbolBuilder {
     global: bool,
     import: bool,
     offset: u64,
+    segment_relative_offset: u64,
 }
 
 impl SymbolBuilder {
@@ -76,6 +79,7 @@ impl SymbolBuilder {
             global: false,
             import: false,
             offset: 0,
+            segment_relative_offset: 0,
         }
     }
     /// The section this symbol belongs to
@@ -89,8 +93,13 @@ impl SymbolBuilder {
     pub fn offset(mut self, offset: u64) -> Self {
         self.offset = offset; self
     }
-    pub fn get_offset(&self) -> u64 {
-        self.offset
+    /// Set the segment relative offset of this symbol, required for relocations
+    pub fn relative_offset(mut self, relative_offset: u64) -> Self {
+        self.segment_relative_offset = relative_offset; self
+    }
+    /// Returns the offset of this symbol relative to the segment it is apart of
+    pub fn get_segment_relative_offset(&self) -> u64 {
+        self.segment_relative_offset
     }
     /// Is this symbol an import?
     pub fn import(mut self) -> Self {
@@ -184,6 +193,7 @@ struct SectionBuilder {
     align: u64,
     offset: u64,
     size: u64,
+    flags: u32,
     sectname: &'static str,
     segname: &'static str,
 }
@@ -195,6 +205,7 @@ impl SectionBuilder {
             addr: 0,
             align: 4,
             offset: 0,
+            flags: S_REGULAR,
             size,
             sectname,
             segname,
@@ -212,6 +223,10 @@ impl SectionBuilder {
     pub fn align(mut self, align: u64) -> Self {
         self.align = align; self
     }
+    /// Set the flags of this section
+    pub fn flags(mut self, flags: u32) -> Self {
+        self.flags = flags; self
+    }
     /// Finalize and create the actual Mach-o section
     pub fn create(self) -> Section {
         let mut sectname = [0u8; 16];
@@ -228,7 +243,7 @@ impl SectionBuilder {
             // FIXME, client needs to set after all offsets known
             reloff: 0,
             nreloc: 0,
-            flags: 2147484672
+            flags: self.flags
         }
     }
 }
@@ -252,8 +267,9 @@ struct SymbolTable {
 
 /// The kind of symbol this is
 enum SymbolType {
-    /// Which `section` this is defined in, and at what `offset`
-    Defined { section: SectionIndex, offset: u64, global: bool },
+    /// Which `section` this is defined in, the `absolute_offset` in the binary, and its
+    /// `segment_relative_offset`
+    Defined { section: SectionIndex, absolute_offset: u64, segment_relative_offset: u64, global: bool },
     /// An undefined symbol (an import)
     Undefined,
 }
@@ -283,7 +299,7 @@ impl SymbolTable {
     pub fn offset(&self, symbol_name: &str) -> Option<u64> {
         self.strtable.get(symbol_name)
          .and_then(|idx| self.symbols.get(&idx))
-         .and_then(|sym| Some(sym.get_offset()))
+         .and_then(|sym| Some(sym.get_segment_relative_offset()))
     }
     /// Lookup this symbols ordinal index in the symbol table, if it has one
     pub fn index(&self, symbol_name: &str) -> Option<SymbolIndex> {
@@ -306,7 +322,12 @@ impl SymbolTable {
             // TODO: add code offset into symbol n_value
             let builder = match kind {
                 SymbolType::Undefined => SymbolBuilder::new(self.strtable_size).global(true).import(),
-                SymbolType::Defined { section, offset, global } => SymbolBuilder::new(self.strtable_size).global(global).offset(offset). section(section)
+                SymbolType::Defined { section, absolute_offset, global, segment_relative_offset } => {
+                    SymbolBuilder::new(self.strtable_size).global(global)
+                        .offset(absolute_offset)
+                        .relative_offset(segment_relative_offset)
+                        .section(section)
+                }
             };
             // insert the builder for this symbol, using its strtab index
             self.symbols.insert(name_index, builder);
@@ -329,7 +350,7 @@ struct SegmentBuilder {
 }
 
 impl SegmentBuilder {
-    pub const NSECTIONS: usize = 2;
+    pub const NSECTIONS: usize = 3;
     /// The size of this segment's _data_, in bytes
     pub fn size(&self) -> u64 {
         self.size
@@ -342,33 +363,40 @@ impl SegmentBuilder {
         // section data
         Header::size_with(&ctx.container) as u64 + Self::load_command_size(ctx)
     }
-    fn build_section(symtab: &mut SymbolTable, sectname: &'static str, segname: &'static str, offset: &mut u64, addr: &mut u64, symbol_offset: &mut u64, section: SectionIndex, definitions: &[Definition]) -> SectionBuilder {
+    // FIXME: this is in desperate need of refactoring, obviously
+    fn build_section(symtab: &mut SymbolTable, sectname: &'static str, segname: &'static str, offset: &mut u64, addr: &mut u64, symbol_offset: &mut u64, section: SectionIndex, definitions: &[Definition], alignment_exponent: u64, flags: Option<u32>) -> SectionBuilder {
         let mut local_size = 0;
+        let mut segment_relative_offset = 0;
         for def in definitions {
             local_size += def.data.len() as u64;
-            symtab.insert(def.name, SymbolType::Defined { section, offset: *symbol_offset, global: def.prop.global });
+            symtab.insert(def.name, SymbolType::Defined { section, segment_relative_offset, absolute_offset: *symbol_offset, global: def.prop.global });
             *symbol_offset += def.data.len() as u64;
+            segment_relative_offset += def.data.len() as u64;
         }
-        let section = SectionBuilder::new(sectname, segname, local_size).offset(*offset).addr(*addr);
+        let mut section = SectionBuilder::new(sectname, segname, local_size).offset(*offset).addr(*addr).align(alignment_exponent);
+        if let Some(flags) = flags {
+            section = section.flags(flags);
+        }
         *offset += local_size;
         *addr += local_size;
         section
     }
     /// Create a new program segment from an `artifact`, symbol table, and context
     // FIXME: this is pub(crate) for now because we can't leak pub(crate) Definition
-    pub(crate) fn new(artifact: &Artifact, code: &[Definition], data: &[Definition], symtab: &mut SymbolTable, ctx: &Ctx) -> Self {
+    pub(crate) fn new(artifact: &Artifact, code: &[Definition], data: &[Definition], cstrings: &[Definition], symtab: &mut SymbolTable, ctx: &Ctx) -> Self {
         let mut offset = Header::size_with(&ctx.container) as u64;
         let mut size = 0;
         let mut symbol_offset = 0;
-        let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code);
-        let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &data);
+        let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code, 4, Some(S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
+        let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &data, 3, None);
+        let cstrings = Self::build_section(symtab, "__cstring", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CSTRING_SECTION_INDEX, &cstrings, 0, Some(S_CSTRING_LITERALS));
         for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
         }
         // FIXME re add assert
         //assert_eq!(offset, Header::size_with(&ctx.container) + Self::load_command_size(ctx));
         debug!("Segment Size: {} Symtable LoadCommand Offset: {}", size, offset);
-        let sections = [text, data];
+        let sections = [text, data, cstrings];
         SegmentBuilder {
             size,
             sections,
@@ -387,6 +415,7 @@ struct Mach<'a> {
     relocations: Relocations,
     code: ArtifactCode<'a>,
     data: ArtifactData<'a>,
+    cstrings: Vec<Definition<'a>>,
     _p: ::std::marker::PhantomData<&'a ()>,
 }
 
@@ -394,10 +423,19 @@ impl<'a> Mach<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         // FIXME: I believe we can avoid this partition by refactoring SegmentBuilder::new
-        let (code, data): (Vec<_>, Vec<_>) = artifact.definitions().partition(|def| def.prop.function);
+        let (mut code, mut data, mut cstrings) = (Vec::new(), Vec::new(), Vec::new());
+        for def in artifact.definitions() {
+            if def.prop.function {
+                code.push(def);
+            } else if def.prop.cstring {
+                cstrings.push(def)
+            } else {
+                data.push(def);
+            }
+        }
 
         let mut symtab = SymbolTable::new();
-        let segment = SegmentBuilder::new(&artifact, &code, &data, &mut symtab, &ctx);
+        let segment = SegmentBuilder::new(&artifact, &code, &data, &cstrings, &mut symtab, &ctx);
         let relocations = build_relocations(&artifact, &symtab);
 
         Mach {
@@ -409,6 +447,7 @@ impl<'a> Mach<'a> {
             _p: ::std::marker::PhantomData::default(),
             code,
             data,
+            cstrings,
         }
     }
     fn header(&self, sizeofcmds: u64) -> Header {
@@ -510,6 +549,14 @@ impl<'a> Mach<'a> {
         debug!("SEEK: after data: {}", file.seek(Current(0))?);
 
         //////////////////////////////
+        // write cstrings
+        //////////////////////////////
+        for cstring in self.cstrings {
+            file.write_all(cstring.data)?;
+        }
+        debug!("SEEK: after cstrings: {}", file.seek(Current(0))?);
+
+        //////////////////////////////
         // write symtable
         //////////////////////////////
         for (idx, symbol) in self.symtab.symbols.into_iter() {
@@ -551,29 +598,46 @@ impl<'a> Mach<'a> {
     }
 }
 
+// FIXME: this should actually return a runtime error if we encounter a from.decl to.decl pair which we don't explicitly match on
 fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
-    use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_GOT_LOAD};
+    use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_UNSIGNED, X86_64_RELOC_GOT_LOAD};
     let mut text_relocations = Vec::new();
+    let mut data_relocations = Vec::new();
     debug!("Generating relocations");
     for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.decl);
-        let reloc = match link.to.decl {
-            &Decl::Function {..} => X86_64_RELOC_BRANCH,
-            &Decl::Data {..} => X86_64_RELOC_SIGNED,
-            &Decl::CString {..} => X86_64_RELOC_SIGNED,
-            &Decl::FunctionImport => X86_64_RELOC_BRANCH,
-            &Decl::DataImport => X86_64_RELOC_GOT_LOAD,
+        let (absolute, reloc) = match (link.from.decl, link.to.decl) {
+            // NB: we currenetly deduce the meaning of our relocation from from decls -> to decl relocations
+            // e.g., global static data references, are constructed from Data -> Data links
+            // various static function pointers in the .data section
+            (&Decl::Data {..}, &Decl::Function {..}) => (true, X86_64_RELOC_UNSIGNED),
+            (&Decl::Data {..}, &Decl::FunctionImport {..}) => (true, X86_64_RELOC_UNSIGNED),
+            // anything else is just a regular relocation/callq
+            (_, &Decl::Function {..}) => (false, X86_64_RELOC_BRANCH),
+            // we are a relocation in the data section to another object in the data section, e.g., a static reference
+            (&Decl::Data {..}, &Decl::Data {..}) => (true, X86_64_RELOC_UNSIGNED),
+            (_, &Decl::Data {..}) => (false, X86_64_RELOC_SIGNED),
+            // TODO: we will also need to specify relocations from Data to Cstrings, e.g., char * STR = "a global static string";
+            (_, &Decl::CString {..}) => (false, X86_64_RELOC_SIGNED),
+            (_, &Decl::FunctionImport) => (false, X86_64_RELOC_BRANCH),
+            (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
         };
         match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
             (Some(base_offset), Some(to_symbol_index)) => {
                 debug!("{} offset: {}", link.to.name, base_offset + link.at);
-                let reloc = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc).create();
-                text_relocations.push(reloc);
+                let builder = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc);
+                // NB: we currently associate absolute relocations with data relocations; this may prove
+                // too fragile for future additions; needs analysis
+                if absolute {
+                    data_relocations.push(builder.absolute().create());
+                } else {
+                    text_relocations.push(builder.create());
+                }
             },
             _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
         }
     }
-    vec![text_relocations]
+    vec![text_relocations, data_relocations]
 }
 
 pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {

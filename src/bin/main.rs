@@ -73,11 +73,13 @@ fn run (args: Args) -> Result<(), Error> {
     // it is a runtime error to define a symbol _without_ declaring it first
     obj.declarations(
         [
-            ("deadbeef", Decl::Function { global: false }),
-            ("main",     Decl::Function { global: true }),
-            ("str.1",    Decl::CString { global: false }),
-            ("DEADBEEF", Decl::DataImport),
-            ("printf",   Decl::FunctionImport),
+            ("deadbeef",   Decl::Function { global: false }),
+            ("main",       Decl::Function { global: true }),
+            ("str.1",      Decl::CString { global: false }),
+            ("DEADBEEF",   Decl::DataImport),
+            ("STATIC",     Decl::Data { global: true, writable: true }),
+            ("STATIC_REF", Decl::Data { global: true, writable: true }),
+            ("printf",     Decl::FunctionImport),
         ].into_iter().cloned()
     )?;
 
@@ -101,40 +103,69 @@ fn run (args: Args) -> Result<(), Error> {
              0x89, 0xc8,
              0x5d,
              0xc3])?;
+
     // main:
     // 55	push   %rbp
     // 48 89 e5	mov    %rsp,%rbp
+    // 48 83 ec 10	sub    $0x10,%rsp
+    // c7 45 fc 00 00 00 00	movl   $0x0,-0x4(%rbp)
     // b8 00 00 00 00	mov    $0x0,%eax
-    // e8 00 00 00 00   callq  0x0 <deadbeef>
+    // e8 00 00 00 00	callq  0x16 <deadbeef>
+    // 48 8d 3d 00 00 00 00	lea    0x0(%rip),%rdi        # 0x1d <main+29> will be: "deadbeef: 0x%x - %d\n"
+    // 48 8b 0d 00 00 00 00	mov    0x0(%rip),%rcx        # 0x24 <main+36>
+    // 8b 11	mov    (%rcx),%edx
     // 89 c6	mov    %eax,%esi
-    // 48 8d 3d 00 00 00 00 lea    0x0(%rip),%rdi # will be: deadbeef: 0x%x\n
-    // b8 00 00 00 00	mov    $0x0,%eax
-    // e8 00 00 00 00	callq  0x3f <main+33>  # printf
-    // b8 00 00 00 00	mov    $0x0,%eax
+    // b0 00	mov    $0x0,%al
+    // e8 00 00 00 00	callq  0x2f <main+47> # printf
+    // 31 d2	xor    %edx,%edx
+    // 89 45 f8	mov    %eax,-0x8(%rbp)
+    // 89 d0	mov    %edx,%eax
+    // 48 83 c4 10	add    $0x10,%rsp
     // 5d	pop    %rbp
     // c3	retq
     obj.define("main",
-        vec![0x55,
+        vec![
+             0x55,
              0x48, 0x89, 0xe5,
+             0x48, 0x83, 0xec, 0x10,
+             0xc7, 0x45, 0xfc, 0x00, 0x00, 0x00, 0x00,
              0xb8, 0x00, 0x00, 0x00, 0x00,
              0xe8, 0x00, 0x00, 0x00, 0x00,
-             0x89, 0xc6,
              0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,
-             0xb8, 0x00, 0x00, 0x00, 0x00,
+             0x48, 0x8b, 0x0d, 0x00, 0x00, 0x00, 0x00,
+             0x8b, 0x11,
+             0x89, 0xc6,
+             0xb0, 0x00,
              0xe8, 0x00, 0x00, 0x00, 0x00,
-             0xb8, 0x00, 0x00, 0x00, 0x00,
+             0x31, 0xd2,
+             0x89, 0x45, 0xf8,
+             0x89, 0xd0,
+             0x48, 0x83, 0xc4, 0x10,
              0x5d,
-             0xc3])?;
-    obj.define("str.1", b"deadbeef: 0x%x\n\0".to_vec())?;
+             0xc3,
+        ])?;
+    // define static data
+    obj.define("str.1", b"deadbeef: 0x%x - 0x%x\n\0".to_vec())?;
+    obj.define("STATIC",     [0xbe, 0xba, 0xfe, 0xca].to_vec())?;
+    // .data static references need to be zero'd out explicitly for now.
+    obj.define("STATIC_REF", vec![0; 8])?;
 
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
-    obj.link(Link { from: "main", to: "str.1", at: 19 })?;
-    obj.link(Link { from: "main", to: "printf", at: 29 })?;
-    obj.link(Link { from: "main", to: "deadbeef", at: 10 })?;
-    obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 7 })?;
+    // -- main relocations --
+    obj.link(Link { from: "main", to: "deadbeef", at: 0x15 })?;
+    obj.link(Link { from: "main", to: "str.1", at: 0x1c })?;
+    obj.link(Link { from: "main", to: "STATIC_REF", at: 0x23 })?;
+    obj.link(Link { from: "main", to: "printf", at: 0x2e })?;
 
-    // Finally, we the object file
+    // -- deadbeef relocations --
+    obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 0x7 })?;
+
+    // -- static data relocations --
+    // this is a reference to an object in the data section, so we are always at relative offset 0
+    obj.link(Link { from: "STATIC_REF", to: "STATIC", at: 0 })?;
+
+    // Finally, we emit the object file
     obj.write(file)?;
     if let Some(output) = args.link {
         link(&args.filename, &output, &args.linkline)?;
