@@ -1,6 +1,6 @@
 [package]
 name = "faerie"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["m4b <m4b.github.io@gmail.com>", "Dan Gohman <sunfish@mozilla.com>", "Pat Hickey <pat@moreproductive.org>"]
 readme = "README.md"
 keywords = ["elf", "mach-o", "binary", "object", "compiler"]
@@ -17,12 +17,12 @@ path = "src/bin/main.rs"
 
 [dependencies]
 goblin = "0.0.17"
-scroll = "0.9.0"
-log = "0.4.3"
-env_logger = "0.5.10"
-indexmap = "1.0.1"
-structopt = "0.2.10"
-structopt-derive = "0.2.10"
-string-interner = "0.6.3"
-failure = "0.1.1"
+scroll = "0.9"
+log = "0.4"
+env_logger = "0.5"
+indexmap = "1"
+structopt = "0.2"
+structopt-derive = "0.2"
+string-interner = "0.6"
+failure = "0.1"
 target-lexicon = "0.0.3"
