@@ -1,4 +1,9 @@
 //! The ELF32/64 bit backend for transforming an artifact to a valid, ELF object file.
+// FIXME: this is temporary, we anticipate None variant and pub fn rel being used in the future
+// for: 1. object files with source file name symbols
+//      2. 32-bit object files
+// respectively; remove this once used again
+#![allow(dead_code)]
 
 use goblin;
 use failure::Error;
