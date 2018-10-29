@@ -440,19 +440,19 @@ impl<'a> Elf<'a> {
         // store the size of this code
         let size = data.len();
         debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        // the symbols section reference/index will be the current number of sections
+        let shndx = self.sections.len() + 3; // null + strtab + symtab
         // build symbol based on this _and_ the properties of the definition
         let mut symbol = SymbolBuilder::new(if prop.function { SymbolType::Function } else { SymbolType::Object })
             .size(size)
             .name_offset(offset)
             .local(!prop.global)
             .create();
-        // the symbols section reference/index will be the current number of sections
-        symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
+        symbol.st_shndx = shndx;
 
         // now we build the section a la LLVM "function sections"
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
-        // the symbols section reference/index will be the current number of sections
-        section_symbol.st_shndx = self.symbols.len() + 3; // null + strtab + symtab
+        section_symbol.st_shndx = shndx;
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
         self.section_symbols.insert(idx, section_symbol);
@@ -496,12 +496,12 @@ impl<'a> Elf<'a> {
     }
     pub fn link(&mut self, l: &LinkAndDecl) {
         debug!("Link: {:?}", l);
-        let (from_idx, to_idx) = {
+        let (from_idx, to_idx, shndx) = {
             let to_idx = self.strings.get_or_intern(l.to.name);
             let from_idx = self.strings.get_or_intern(l.from.name);
             let (to_idx, _, _) = self.symbols.get_full(&to_idx).expect("to_idx present in symbols");
-            let (from_idx, _, _) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
-            (from_idx, to_idx)
+            let (from_idx, _, symbol) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
+            (from_idx, to_idx, symbol.st_shndx)
         };
         let (reloc, addend) = if let Some(ovr) = l.reloc {
             (ovr.reloc, i64::from(ovr.addend))
@@ -540,9 +540,9 @@ impl<'a> Elf<'a> {
         };
 
         let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(l.at).addend(addend).create();
-        self.add_reloc(l.from.name, reloc, from_idx)
+        self.add_reloc(l.from.name, reloc, from_idx, shndx)
     }
-    fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize) {
+    fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize, shndx: usize) {
         debug!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
         let reloc_size = Relocation::size(reloc.r_addend.is_some(), self.ctx) as u64;
         if self.relocations.contains_key(&idx) {
@@ -558,8 +558,8 @@ impl<'a> Elf<'a> {
             let mut reloc_section = SectionBuilder::new(reloc_size).name_offset(reloc_section_offset).section_type(SectionType::Relocation).create(&self.ctx);
             // its sh_link always points to the symtable
             reloc_section.sh_link = SYMTAB_LINK as u32;
-            // info tells us which relocation this is relative to
-            reloc_section.sh_info = (idx + 3) as u32;
+            // info tells us which section these relocations apply to
+            reloc_section.sh_info = shndx as u32;
             self.relocations.insert(idx, (reloc_section, vec![reloc]));
             self.nsections += 1;
         }
