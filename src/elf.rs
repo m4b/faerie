@@ -277,6 +277,7 @@ impl SectionBuilder {
 struct SectionInfo {
     header: Section,
     symbol: Symbol,
+    name: StringIndex,
 }
 
 // r_offset: 17 r_typ: 4 r_sym: 12 r_addend: fffffffffffffffc rela: true,
@@ -435,8 +436,7 @@ impl<'a> Elf<'a> {
               "data"
           };
         // intern section and symbol name strings
-        let (_reloc_idx, _reloc_section_offset) = self.new_string(format!(".reloc.{}.{}", segment_name, name));
-        let (_text_idx, section_offset) = self.new_string(format!(".{}.{}", segment_name, name));
+        let (section_name, section_offset) = self.new_string(format!(".{}.{}", segment_name, name));
         // can do prefix optimization here actually, because .text.*
         let (idx, offset) = self.new_string(name.to_string());
         // store the size of this code
@@ -485,6 +485,7 @@ impl<'a> Elf<'a> {
         self.sections.insert(idx, SectionInfo {
             header: section,
             symbol: section_symbol,
+            name: section_name,
         });
         self.nsections += 1;
         // increment the size
@@ -558,7 +559,12 @@ impl<'a> Elf<'a> {
         } else {
             debug!("{} does NOT have relocs", relocee);
             // now create the relocation section
-            let (_reloc_idx, reloc_section_offset) = self.new_string(format!(".reloc.{}", relocee));
+            let reloc_name = {
+                let (_, section) = self.sections.get_index(shndx - 3).expect("shndx present in sections");
+                let section_name = self.strings.resolve(section.name).expect("section name in strings");
+                format!(".rela{}", section_name)
+            };
+            let (_reloc_idx, reloc_section_offset) = self.new_string(reloc_name);
             let mut reloc_section = SectionBuilder::new(reloc_size).name_offset(reloc_section_offset).section_type(SectionType::Relocation).create(&self.ctx);
             // its sh_link always points to the symtable
             reloc_section.sh_link = SYMTAB_LINK as u32;
