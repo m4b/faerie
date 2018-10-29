@@ -64,6 +64,7 @@ pub struct Prop {
     pub function: bool,
     pub writable: bool,
     pub cstring: bool,
+    pub section: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -87,7 +88,9 @@ pub enum Decl {
     /// A data object defined in this artifact
     Data { global: bool, writable: bool },
     /// A null-terminated string object defined in this artifact
-    CString { global: bool }
+    CString { global: bool },
+    /// A DWARF debug section defined in this artifact
+    DebugSection { is_64: bool },
 }
 
 impl Decl {
@@ -156,6 +159,13 @@ impl Decl {
         match *self {
             FunctionImport => true,
             DataImport => true,
+            _ => false,
+        }
+    }
+    /// Is this a section?
+    pub fn is_section(&self) -> bool {
+        match *self {
+            Decl::DebugSection {..} => true,
             _ => false,
         }
     }
@@ -415,9 +425,10 @@ impl Artifact {
                     return Err(ArtifactError::DuplicateDefinition(name.as_ref().to_string()));
                 }
                 let prop = match stype.decl {
-                    Decl::CString { global } => Prop { global, function: false, writable: false, cstring: true },
-                    Decl::Data { global, writable } => Prop { global, function: false, writable, cstring: false },
-                    Decl::Function { global } => Prop { global, function: true, writable: false, cstring: false},
+                    Decl::CString { global } => Prop { global, function: false, writable: false, cstring: true, section: false },
+                    Decl::Data { global, writable } => Prop { global, function: false, writable, cstring: false, section: false },
+                    Decl::Function { global } => Prop { global, function: true, writable: false, cstring: false, section: false },
+                    Decl::DebugSection { .. } => Prop { global: false, function: false, writable: false, cstring: false, section: true},
                     _ if stype.decl.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };

@@ -606,9 +606,12 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     debug!("Generating relocations");
     for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.decl);
+        // NB: we currenetly deduce the meaning of our relocation from from decls -> to decl relocations
+        // e.g., global static data references, are constructed from Data -> Data links
         let (absolute, reloc) = match (link.from.decl, link.to.decl) {
-            // NB: we currenetly deduce the meaning of our relocation from from decls -> to decl relocations
-            // e.g., global static data references, are constructed from Data -> Data links
+            // addresses in debug sections
+            (&Decl::DebugSection {..}, _) => panic!("unimplemented DebugSection link"),
+            (_, &Decl::DebugSection {..}) => panic!("invalid DebugSection link"),
             // various static function pointers in the .data section
             (&Decl::Data {..}, &Decl::Function {..}) => (true, X86_64_RELOC_UNSIGNED),
             (&Decl::Data {..}, &Decl::FunctionImport {..}) => (true, X86_64_RELOC_UNSIGNED),

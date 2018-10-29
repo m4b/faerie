@@ -493,6 +493,34 @@ impl<'a> Elf<'a> {
 
         self.code.insert(idx, data);
     }
+    pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
+        let (idx, offset) = self.new_string(name.to_string());
+        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        // store the size of this code
+        let size = data.len();
+        // the symbols section reference/index will be the current number of sections
+        let shndx = self.sections.len() + 3; // null + strtab + symtab
+        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
+        section_symbol.st_shndx = shndx;
+        // FIXME: probably add padding alignment
+
+        let mut section = SectionBuilder::new(size as u64)
+            .name_offset(offset)
+            .section_type(SectionType::Bits)
+            .create(&self.ctx);
+        // the offset is the head of how many program bits we've added
+        section.sh_offset = self.sizeof_bits as u64;
+        self.sections.insert(shndx, SectionInfo {
+            header: section,
+            symbol: section_symbol,
+            name: idx,
+        });
+        self.nsections += 1;
+        // increment the size
+        self.sizeof_bits += size;
+
+        self.code.insert(idx, data);
+    }
     pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
         let symbol = SymbolBuilder::new(SymbolType::Import).name_offset(offset).create();
@@ -501,12 +529,31 @@ impl<'a> Elf<'a> {
     }
     pub fn link(&mut self, l: &LinkAndDecl) {
         debug!("Link: {:?}", l);
-        let (from_idx, to_idx, shndx) = {
+        let (to_idx, to_shndx) = {
             let to_idx = self.strings.get_or_intern(l.to.name);
+            if l.to.decl.is_section() {
+                let (to_idx, _, _) = self.sections.get_full(&to_idx).expect("to_idx present in sections");
+                // Section symbols come after special symbols.
+                // The section index is after null + strtab + symtab.
+                (to_idx + self.special_symbols.len(), to_idx + 3)
+            } else {
+                let (to_idx, _, symbol) = self.symbols.get_full(&to_idx).expect("to_idx present in symbols");
+                // Normal symbols come after special symbols and section symbols.
+                (to_idx + self.special_symbols.len() + self.sections.len(), symbol.st_shndx)
+            }
+        };
+        let (from_idx, from_shndx) = {
             let from_idx = self.strings.get_or_intern(l.from.name);
-            let (to_idx, _, _) = self.symbols.get_full(&to_idx).expect("to_idx present in symbols");
-            let (from_idx, _, symbol) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
-            (from_idx, to_idx, symbol.st_shndx)
+            if l.from.decl.is_section() {
+                let (from_idx, _, _) = self.sections.get_full(&from_idx).expect("from_idx present in sections");
+                // Section symbols come after special symbols.
+                // The section index is after null + strtab + symtab.
+                (from_idx + self.special_symbols.len(), from_idx + 3)
+            } else {
+                let (from_idx, _, symbol) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
+                // Normal symbols come after special symbols and section symbols.
+                (from_idx + self.special_symbols.len() + self.sections.len(), symbol.st_shndx)
+            }
         };
         let (reloc, addend) = if let Some(ovr) = l.reloc {
             (ovr.reloc, i64::from(ovr.addend))
@@ -520,6 +567,7 @@ impl<'a> Elf<'a> {
                         Decl::Data {..} => (reloc::R_X86_64_PC32, -4),
                         Decl::CString {..} => (reloc::R_X86_64_PC32, -4),
                         Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+                        _ => panic!("unsupported relocation {:?}", l),
                     }
                 },
                 Decl::Data {..} => {
@@ -535,24 +583,23 @@ impl<'a> Elf<'a> {
         };
 
         let sym_idx = match *l.to.decl {
-            Decl::Function {..} | Decl::Data {..} | Decl::CString {..} => to_idx + 2,
-            // +2 for NOTYPE and FILE symbols
-            Decl::FunctionImport | Decl::DataImport => {
-                to_idx + self.special_symbols.len() + self.sections.len()
-                // + special_symbols.len() + sections.len() because this is where the import
-                // symbols begin
+            Decl::Function {..} | Decl::Data {..} | Decl::CString {..} | Decl::DebugSection {..} => {
+                // We don't emit symbols for null + strtab + symtab, and
+                // section symbols come after special symbols.
+                (to_shndx - 3) + self.special_symbols.len()
             }
+            Decl::FunctionImport | Decl::DataImport => to_idx,
         };
 
         let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(l.at).addend(addend).create();
-        self.add_reloc(l.from.name, reloc, from_idx, shndx)
+        self.add_reloc(l.from.name, reloc, from_idx, from_shndx)
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize, shndx: usize) {
-        debug!("add reloc for symbol {} - reloc: {:?}", idx, &reloc);
+        debug!("add reloc for symbol {} section {} - reloc: {:?}", idx, shndx, &reloc);
         let reloc_size = Relocation::size(reloc.r_addend.is_some(), self.ctx) as u64;
-        if self.relocations.contains_key(&idx) {
+        if self.relocations.contains_key(&shndx) {
             debug!("{} has relocs", relocee);
-            let &mut (ref mut section, ref mut relocs) = self.relocations.get_mut(&idx).unwrap();
+            let &mut (ref mut section, ref mut relocs) = self.relocations.get_mut(&shndx).unwrap();
             // its size is currently how many relocations there are
             section.sh_size += section.sh_entsize;
             relocs.push(reloc);
@@ -570,7 +617,7 @@ impl<'a> Elf<'a> {
             reloc_section.sh_link = SYMTAB_LINK as u32;
             // info tells us which section these relocations apply to
             reloc_section.sh_info = shndx as u32;
-            self.relocations.insert(idx, (reloc_section, vec![reloc]));
+            self.relocations.insert(shndx, (reloc_section, vec![reloc]));
             self.nsections += 1;
         }
     }
@@ -726,7 +773,11 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        elf.add_definition(def.name, def.data, def.prop);
+        if def.prop.section {
+            elf.add_section(def.name, def.data, def.prop);
+        } else {
+            elf.add_definition(def.name, def.data, def.prop);
+        }
     }
     for (ref import, ref kind) in artifact.imports() {
         debug!("Import: {:?} -> {:?}", import, kind);
