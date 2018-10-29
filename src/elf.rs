@@ -273,6 +273,12 @@ impl SectionBuilder {
     }
 }
 
+#[derive(Debug)]
+struct SectionInfo {
+    header: Section,
+    symbol: Symbol,
+}
+
 // r_offset: 17 r_typ: 4 r_sym: 12 r_addend: fffffffffffffffc rela: true,
 /// A builder for constructing a cross platform relocation
 struct RelocationBuilder {
@@ -327,9 +333,8 @@ struct Elf<'a> {
     relocations: IndexMap<StringIndex, (Section, Vec<Relocation>)>,
     symbols: IndexMap<StringIndex, Symbol>,
     special_symbols: Vec<Symbol>,
-    section_symbols: IndexMap<StringIndex, Symbol>,
     imports: HashMap<StringIndex, ImportKind>,
-    sections: HashMap<StringIndex, Section>,
+    sections: IndexMap<StringIndex, SectionInfo>,
     offsets: HashMap<StringIndex, Offset>,
     sizeof_strtab: Offset,
     strings: DefaultStringInterner,
@@ -345,7 +350,6 @@ impl<'a> fmt::Debug for Elf<'a> {
         writeln!(fmt, "{}", self.name)?;
         writeln!(fmt, "{:?}", self.code)?;
         writeln!(fmt, "{:#?}", self.        relocations)?;
-        writeln!(fmt, "{:#?}", self.        symbols)?;
         writeln!(fmt, "{:?}", self.        imports)?;
         writeln!(fmt, "{:?}", self.        sections)?;
         writeln!(fmt, "{:?}", self.        offsets)?;
@@ -366,7 +370,6 @@ impl<'a> Elf<'a> {
         let mut offsets = HashMap::new();
         let mut strings = DefaultStringInterner::default();
         let mut special_symbols = Vec::new();
-        let section_symbols = IndexMap::new();
         let mut sizeof_strtab = 1;
 
         {
@@ -397,8 +400,7 @@ impl<'a> Elf<'a> {
             imports:     HashMap::new(),
             symbols:     IndexMap::new(),
             special_symbols,
-            section_symbols,
-            sections:    HashMap::new(),
+            sections:    IndexMap::new(),
             nsections:   4,
             offsets,
             strings,
@@ -449,13 +451,12 @@ impl<'a> Elf<'a> {
             .local(!prop.global)
             .create();
         symbol.st_shndx = shndx;
+        // insert it into our symbol table
+        self.symbols.insert(idx, symbol);
 
         // now we build the section a la LLVM "function sections"
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
         section_symbol.st_shndx = shndx;
-        // insert it into our symbol table
-        self.symbols.insert(idx, symbol);
-        self.section_symbols.insert(idx, section_symbol);
         // FIXME: probably add padding alignment
 
         let mut section = {
@@ -481,7 +482,10 @@ impl<'a> Elf<'a> {
         // NB this is very brittle
         // - it means the entry is a sequence of 1 byte each, i.e., a cstring
         if !prop.function { section.sh_entsize = 1 };
-        self.sections.insert(idx, section);
+        self.sections.insert(idx, SectionInfo {
+            header: section,
+            symbol: section_symbol,
+        });
         self.nsections += 1;
         // increment the size
         self.sizeof_bits += size;
@@ -533,8 +537,8 @@ impl<'a> Elf<'a> {
             Decl::Function {..} | Decl::Data {..} | Decl::CString {..} => to_idx + 2,
             // +2 for NOTYPE and FILE symbols
             Decl::FunctionImport | Decl::DataImport => {
-                to_idx + self.special_symbols.len() + self.section_symbols.len()
-                // + special_symbols.len() + section_symbols.len() because this is where the import
+                to_idx + self.special_symbols.len() + self.sections.len()
+                // + special_symbols.len() + sections.len() because this is where the import
                 // symbols begin
             }
         };
@@ -571,7 +575,7 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         let sizeof_symtab = (self.symbols.len() +
                              self.special_symbols.len() +
-                             self.section_symbols.len()) * Symbol::size(self.ctx.container);
+                             self.sections.len()) * Symbol::size(self.ctx.container);
         let sizeof_relocs = self.relocations.iter().fold(0, |acc, (_, &(ref _shdr, ref rels))| rels.len() + acc) * Relocation::size(true, self.ctx);
         let nonexec_stack_note_name_offset = self.new_string(".note.GNU-stack".into()).1;
         let strtab_offset = self.sizeof_bits as u64;
@@ -629,7 +633,7 @@ impl<'a> Elf<'a> {
         // FunFact: symtab.sh_info acts as a delimiter pointing to which are the "external" functions in the object file;
         // if this isn't correct, it will segfault linkers or cause them to _sometimes_ emit garbage, ymmv
         symtab.sh_info =
-            (self.special_symbols.len() + self.section_symbols.len() + self.nlocals) as u32;
+            (self.special_symbols.len() + self.sections.len() + self.nlocals) as u32;
         section_headers.push(symtab);
 
         /////////////////////////////////////
@@ -653,19 +657,14 @@ impl<'a> Elf<'a> {
             debug!("Special Symbol: {:?}", symbol);
             file.iowrite_with(symbol, self.ctx)?;
         }
-        for (_id, symbol) in self.section_symbols.into_iter() {
-            debug!("Section Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+        for (_id, section) in self.sections.into_iter() {
+            debug!("Section Symbol: {:?}", section.symbol);
+            file.iowrite_with(section.symbol, self.ctx)?;
+            section_headers.push(section.header);
         }
-        for (id, symbol) in self.symbols.into_iter() {
+        for (_id, symbol) in self.symbols.into_iter() {
             debug!("Symbol: {:?}", symbol);
             file.iowrite_with(symbol, self.ctx)?;
-            match self.sections.get(&id) {
-                Some(section) => {
-                    section_headers.push(section.clone());
-                },
-                None => () // FIXME: warn
-            }
         }
         let after_symtab = file.seek(Current(0))?;
         debug!("after_symtab {:#x} - shdr_size {}", after_symtab, Section::size(&self.ctx));
