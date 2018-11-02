@@ -592,7 +592,7 @@ impl<'a> Elf<'a> {
         header.e_shnum = self.nsections;
         header.e_shstrndx = STRTAB_LINK;
         
-        file.iowrite_with(header, self.ctx)?;
+        file.iowrite_with(&header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
         debug!("after_header {:#x}", after_header);
         assert_eq!(after_header, Header::size(&self.ctx) as u64);
@@ -636,11 +636,11 @@ impl<'a> Elf<'a> {
         // Strtab
         /////////////////////////////////////
         file.seek(Start(strtab_offset))?;
-        file.iowrite(0u8)?; // for the null value in the strtab;
+        file.iowrite(&0u8)?; // for the null value in the strtab;
         for (_id, string) in self.strings.iter() {
             debug!("String: {:?}", string);
             file.write_all(string.as_bytes())?;
-            file.iowrite(0u8)?;
+            file.iowrite(&0u8)?;
         }
         let after_strtab = file.seek(Current(0))?;
         debug!("after_strtab {:#x}", after_strtab);
@@ -651,15 +651,15 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         for symbol in self.special_symbols.into_iter() {
             debug!("Special Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            file.iowrite_with(&symbol, self.ctx)?;
         }
         for (_id, symbol) in self.section_symbols.into_iter() {
             debug!("Section Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            file.iowrite_with(&symbol, self.ctx)?;
         }
         for (id, symbol) in self.symbols.into_iter() {
             debug!("Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            file.iowrite_with(&symbol, self.ctx)?;
             match self.sections.get(&id) {
                 Some(section) => {
                     section_headers.push(section.clone());
@@ -681,7 +681,7 @@ impl<'a> Elf<'a> {
             section_headers.push(section);
             for relocation in relocations.drain(..) {
                 debug!("Relocation: {:?}", relocation);
-                file.iowrite_with(relocation, (relocation.r_addend.is_some(), self.ctx))?;
+                file.iowrite_with(&relocation, (relocation.r_addend.is_some(), self.ctx))?;
             }
         }
         let after_relocs = file.seek(Current(0))?;
@@ -703,7 +703,7 @@ impl<'a> Elf<'a> {
         let shdr_size = section_headers.len() as u64 * Section::size(&self.ctx) as u64;
         for shdr in section_headers {
             debug!("Section: {:?}", shdr);
-            file.iowrite_with(shdr, self.ctx)?;
+            file.iowrite_with(&shdr, self.ctx)?;
         }
 
         let after_shdrs = file.seek(Current(0))?;

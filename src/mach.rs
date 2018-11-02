@@ -230,9 +230,9 @@ impl SectionBuilder {
     /// Finalize and create the actual Mach-o section
     pub fn create(self) -> Section {
         let mut sectname = [0u8; 16];
-        sectname.pwrite(self.sectname, 0).unwrap();
+        sectname.pwrite(&self.sectname, 0).unwrap();
         let mut segname = [0u8; 16];
-        segname.pwrite(self.segname, 0).unwrap();
+        segname.pwrite(&self.segname, 0).unwrap();
         Section {
             sectname,
             segname,
@@ -494,7 +494,7 @@ impl<'a> Mach<'a> {
                 relocation_offset += nrelocs as u64 * SIZEOF_RELOCATION_INFO as u64;
             }
             debug!("Section: {:#?}", section);
-            raw_sections.iowrite_with(section, self.ctx)?;
+            raw_sections.iowrite_with(&section, self.ctx)?;
         }
         let raw_sections = raw_sections.into_inner();
         debug!("Raw sections len: {} - Section start: {} Strtable size: {} - Segment size: {}", raw_sections.len(), first_section_offset, self.symtab.sizeof_strtable(), self.segment.size());
@@ -521,15 +521,15 @@ impl<'a> Mach<'a> {
         //////////////////////////////
         // write header
         //////////////////////////////
-        file.iowrite_with(header, self.ctx)?;
+        file.iowrite_with(&header, self.ctx)?;
         debug!("SEEK: after header: {}", file.seek(Current(0))?);
 
         //////////////////////////////
         // write load commands
         //////////////////////////////
-        file.iowrite_with(segment_load_command, self.ctx)?;
+        file.iowrite_with(&segment_load_command, self.ctx)?;
         file.write_all(&raw_sections)?;
-        file.iowrite_with(symtab_load_command, self.ctx.le)?;
+        file.iowrite_with(&symtab_load_command, self.ctx.le)?;
         debug!("SEEK: after load commands: {}", file.seek(Current(0))?);
 
         //////////////////////////////
@@ -562,7 +562,7 @@ impl<'a> Mach<'a> {
         for (idx, symbol) in self.symtab.symbols.into_iter() {
             let symbol = symbol.create();
             debug!("{}: {:?}", idx, symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            file.iowrite_with(&symbol, self.ctx)?;
         }
         debug!("SEEK: after symtable: {}", file.seek(Current(0))?);
 
@@ -570,13 +570,13 @@ impl<'a> Mach<'a> {
         // write strtable
         //////////////////////////////
         // we need to write first, empty element - but without an underscore
-        file.iowrite(0u8)?;
+        file.iowrite(&0u8)?;
         for (idx, string) in self.symtab.strtable.into_iter().skip(1) {
             debug!("{}: {:?}", idx, string);
             // yup, an underscore
-            file.iowrite(0x5fu8)?;
+            file.iowrite(&0x5fu8)?;
             file.write_all(string.as_bytes())?;
-            file.iowrite(0u8)?;
+            file.iowrite(&0u8)?;
         }
         debug!("SEEK: after strtable: {}", file.seek(Current(0))?);
 
@@ -587,12 +587,12 @@ impl<'a> Mach<'a> {
             debug!("Relocations: {}", section_relocations.len());
             for reloc in section_relocations.into_iter() {
                 debug!("  {:?}", reloc);
-                file.iowrite_with(reloc, self.ctx.le)?;
+                file.iowrite_with(&reloc, self.ctx.le)?;
             }
         }
         debug!("SEEK: after relocations: {}", file.seek(Current(0))?);
 
-        file.iowrite(0u8)?;
+        file.iowrite(&0u8)?;
 
         Ok(())
     }
