@@ -276,7 +276,7 @@ impl ArtifactBuilder {
         self
     }
     pub fn finish(self) -> Artifact {
-        let name = self.name.unwrap_or("faerie.o".to_owned());
+        let name = self.name.unwrap_or_else(|| "faerie.o".to_owned());
         let mut artifact = Artifact::new(self.target, name);
         artifact.is_library = self.library;
         artifact
