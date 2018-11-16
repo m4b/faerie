@@ -17,4 +17,4 @@ mod elf;
 mod mach;
 
 pub mod artifact;
-pub use artifact::{Artifact, ArtifactBuilder, Link, ImportKind, Decl, RelocOverride};
+pub use artifact::{Artifact, ArtifactBuilder, Link, ImportKind, Decl, Reloc};

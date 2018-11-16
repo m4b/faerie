@@ -1,7 +1,7 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
 use {Artifact, Ctx};
-use artifact::{Decl, Definition};
+use artifact::{Decl, Definition, Reloc};
 use target::make_ctx;
 
 use failure::Error;
@@ -368,6 +368,8 @@ impl SegmentBuilder {
         let mut local_size = 0;
         let mut segment_relative_offset = 0;
         for def in definitions {
+            // FIXME: debug sections aren't implemented yet
+            assert!(!def.prop.section);
             local_size += def.data.len() as u64;
             symtab.insert(def.name, SymbolType::Defined { section, segment_relative_offset, absolute_offset: *symbol_offset, global: def.prop.global });
             *symbol_offset += def.data.len() as u64;
@@ -605,25 +607,31 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     let mut data_relocations = Vec::new();
     debug!("Generating relocations");
     for link in artifact.links() {
-        debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.to.decl);
-        // NB: we currenetly deduce the meaning of our relocation from from decls -> to decl relocations
-        // e.g., global static data references, are constructed from Data -> Data links
-        let (absolute, reloc) = match (link.from.decl, link.to.decl) {
-            // addresses in debug sections
-            (&Decl::DebugSection {..}, _) => panic!("unimplemented DebugSection link"),
-            (_, &Decl::DebugSection {..}) => panic!("invalid DebugSection link"),
-            // various static function pointers in the .data section
-            (&Decl::Data {..}, &Decl::Function {..}) => (true, X86_64_RELOC_UNSIGNED),
-            (&Decl::Data {..}, &Decl::FunctionImport {..}) => (true, X86_64_RELOC_UNSIGNED),
-            // anything else is just a regular relocation/callq
-            (_, &Decl::Function {..}) => (false, X86_64_RELOC_BRANCH),
-            // we are a relocation in the data section to another object in the data section, e.g., a static reference
-            (&Decl::Data {..}, &Decl::Data {..}) => (true, X86_64_RELOC_UNSIGNED),
-            (_, &Decl::Data {..}) => (false, X86_64_RELOC_SIGNED),
-            // TODO: we will also need to specify relocations from Data to Cstrings, e.g., char * STR = "a global static string";
-            (_, &Decl::CString {..}) => (false, X86_64_RELOC_SIGNED),
-            (_, &Decl::FunctionImport) => (false, X86_64_RELOC_BRANCH),
-            (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
+        debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.reloc);
+        let (absolute, reloc) = match link.reloc {
+            Reloc::Auto => {
+                // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
+                // e.g., global static data references, are constructed from Data -> Data links
+                match (link.from.decl, link.to.decl) {
+                    (&Decl::DebugSection {..}, _) => panic!("must use Reloc::Debug for debug section links"),
+                    // only debug sections should link to debug sections
+                    (_, &Decl::DebugSection {..}) => panic!("invalid DebugSection link"),
+                    // various static function pointers in the .data section
+                    (&Decl::Data {..}, &Decl::Function {..}) => (true, X86_64_RELOC_UNSIGNED),
+                    (&Decl::Data {..}, &Decl::FunctionImport {..}) => (true, X86_64_RELOC_UNSIGNED),
+                    // anything else is just a regular relocation/callq
+                    (_, &Decl::Function {..}) => (false, X86_64_RELOC_BRANCH),
+                    // we are a relocation in the data section to another object in the data section, e.g., a static reference
+                    (&Decl::Data {..}, &Decl::Data {..}) => (true, X86_64_RELOC_UNSIGNED),
+                    (_, &Decl::Data {..}) => (false, X86_64_RELOC_SIGNED),
+                    // TODO: we will also need to specify relocations from Data to Cstrings, e.g., char * STR = "a global static string";
+                    (_, &Decl::CString {..}) => (false, X86_64_RELOC_SIGNED),
+                    (_, &Decl::FunctionImport) => (false, X86_64_RELOC_BRANCH),
+                    (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
+                }
+            }
+            Reloc::Raw { .. } => panic!("unimplemented Reloc::Raw"),
+            Reloc::Debug { .. } => panic!("unimplemented Reloc::Debug"),
         };
         match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
             (Some(base_offset), Some(to_symbol_index)) => {

@@ -11,8 +11,7 @@ use structopt::StructOpt;
 use failure::Error;
 use target_lexicon::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
 
-use faerie::{Link, ArtifactBuilder, Decl, RelocOverride};
-use goblin::elf::reloc;
+use faerie::{Link, ArtifactBuilder, Decl, Reloc};
 use std::path::Path;
 use std::fs::File;
 use std::env;
@@ -87,8 +86,8 @@ fn run (args: Args) -> Result<(), Error> {
     ];
     if args.dwarf {
         declarations.extend(&[
-            (".debug_info", Decl::DebugSection { is_64: false }),
-            (".debug_str", Decl::DebugSection { is_64: false }),
+            (".debug_info", Decl::DebugSection),
+            (".debug_str", Decl::DebugSection),
         ]);
     }
     obj.declarations(declarations.into_iter())?;
@@ -186,15 +185,15 @@ fn run (args: Args) -> Result<(), Error> {
         // DWARF relocations
         obj.link_with(
             Link { from: ".debug_info", to: "main", at: 0},
-            RelocOverride { reloc: reloc::R_X86_64_64, addend: 0},
+            Reloc::Debug { size: 8, addend: 0},
         )?;
         obj.link_with(
             Link { from: ".debug_info", to: ".debug_info", at: 0x8},
-            RelocOverride { reloc: reloc::R_X86_64_32, addend: 0xc},
+            Reloc::Debug { size: 4, addend: 0xc},
         )?;
         obj.link_with(
             Link { from: ".debug_info", to: ".debug_str", at: 0xc},
-            RelocOverride { reloc: reloc::R_X86_64_32, addend: 0x4},
+            Reloc::Debug { size: 4, addend: 0x4},
         )?;
     }
 

@@ -8,7 +8,7 @@
 use goblin;
 use failure::Error;
 use {artifact, Artifact, Decl, Ctx, ImportKind};
-use artifact::LinkAndDecl;
+use artifact::{LinkAndDecl, Reloc};
 use target::make_ctx;
 
 use std::collections::{HashMap, hash_map};
@@ -555,32 +555,41 @@ impl<'a> Elf<'a> {
                 (from_idx + self.special_symbols.len() + self.sections.len(), symbol.st_shndx)
             }
         };
-        let (reloc, addend) = if let Some(ovr) = l.reloc {
-            (ovr.reloc, i64::from(ovr.addend))
-        } else {
-            match *l.from.decl {
-                Decl::Function {..} => {
-                    match *l.to.decl {
-                        // NB: this now forces _all_ function references, whether local or not, through the PLT
-                        // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                        Decl::Function {..} | Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
-                        Decl::Data {..} => (reloc::R_X86_64_PC32, -4),
-                        Decl::CString {..} => (reloc::R_X86_64_PC32, -4),
-                        Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
-                        _ => panic!("unsupported relocation {:?}", l),
+        let (reloc, addend) = match l.reloc {
+            Reloc::Auto => {
+                match *l.from.decl {
+                    Decl::Function {..} => {
+                        match *l.to.decl {
+                            // NB: this now forces _all_ function references, whether local or not, through the PLT
+                            // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
+                            Decl::Function {..} | Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
+                            Decl::Data {..} => (reloc::R_X86_64_PC32, -4),
+                            Decl::CString {..} => (reloc::R_X86_64_PC32, -4),
+                            Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+                            _ => panic!("unsupported relocation {:?}", l),
+                        }
+                    },
+                    Decl::Data {..} => {
+                        if self.ctx.is_big() {
+                            // Select an absolute relocation that is the size of a pointer.
+                            (reloc::R_X86_64_64, 0)
+                        } else {
+                            (reloc::R_X86_64_32, 0)
+                        }
                     }
-                },
-                Decl::Data {..} => {
-                    if self.ctx.is_big() {
-                        // Select an absolute relocation that is the size of a pointer.
-                        (reloc::R_X86_64_64, 0)
-                    } else {
-                        (reloc::R_X86_64_32, 0)
-                    }
+                    _ => panic!("unsupported relocation {:?}", l),
                 }
-                _ => panic!("unsupported relocation {:?}", l),
+            }
+            Reloc::Raw { reloc, addend } => (reloc, addend),
+            Reloc::Debug { size, addend } => {
+                match size {
+                    4 => (reloc::R_X86_64_32, addend),
+                    8 => (reloc::R_X86_64_64, addend),
+                    _ => panic!("unsupported relocation {:?}", l),
+                }
             }
         };
+        let addend = i64::from(addend);
 
         let sym_idx = match *l.to.decl {
             Decl::Function {..} | Decl::Data {..} | Decl::CString {..} | Decl::DebugSection {..} => {
