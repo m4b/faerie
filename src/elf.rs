@@ -435,19 +435,13 @@ impl<'a> Elf<'a> {
               // we'd add ro here once the prop supports that
               "data"
           };
-        // intern section and symbol name strings
-        let (section_name, section_offset) = self.new_string(format!(".{}.{}", segment_name, name));
+        let section_name = format!(".{}.{}", segment_name, name);
         // store the size of this code
         let size = data.len();
-        // the symbols section reference/index will be the current number of sections
-        let shndx = self.sections.len() + 3; // null + strtab + symtab
 
         // now we build the section a la LLVM "function sections"
-        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
-        section_symbol.st_shndx = shndx;
         // FIXME: probably add padding alignment
-
-        let mut section = {
+        let section = {
             let stype =
                 if prop.function {
                     SectionType::Bits
@@ -458,28 +452,13 @@ impl<'a> Elf<'a> {
                 };
 
             let tmp = SectionBuilder::new(size as u64)
-                .name_offset(section_offset)
                 .section_type(stype)
                 .alloc().writable(prop.writable);
 
             // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
-            if prop.function { tmp.exec().create(&self.ctx) } else { tmp.create(&self.ctx) }
+            if prop.function { tmp.exec() } else { tmp }
         };
-        // the offset is the head of how many program bits we've added
-        section.sh_offset = self.sizeof_bits as u64;
-        // NB this is very brittle
-        // - it means the entry is a sequence of 1 byte each, i.e., a cstring
-        if !prop.function { section.sh_entsize = 1 };
-        self.sections.insert(section_name, SectionInfo {
-            header: section,
-            symbol: section_symbol,
-            name: section_name,
-        });
-        self.nsections += 1;
-        // increment the size
-        self.sizeof_bits += size;
-
-        self.code.insert(section_name, data);
+        let shndx = self.add_progbits(section_name, section, data);
 
         // can do prefix optimization here actually, because .text.*
         let (idx, offset) = self.new_string(name.to_string());
@@ -495,7 +474,13 @@ impl<'a> Elf<'a> {
         self.symbols.insert(idx, symbol);
     }
     pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
-        let (idx, offset) = self.new_string(name.to_string());
+        let section = SectionBuilder::new(data.len() as u64)
+            .section_type(SectionType::Bits);
+        self.add_progbits(name.to_string(), section, data);
+    }
+    /// Create a progbits section (and its section symbol), and return the section index.
+    fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
+        let (idx, offset) = self.new_string(name);
         debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // store the size of this code
         let size = data.len();
@@ -503,11 +488,9 @@ impl<'a> Elf<'a> {
         let shndx = self.sections.len() + 3; // null + strtab + symtab
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
         section_symbol.st_shndx = shndx;
-        // FIXME: probably add padding alignment
 
-        let mut section = SectionBuilder::new(size as u64)
+        let mut section = section
             .name_offset(offset)
-            .section_type(SectionType::Bits)
             .create(&self.ctx);
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
@@ -521,6 +504,7 @@ impl<'a> Elf<'a> {
         self.sizeof_bits += size;
 
         self.code.insert(idx, data);
+        shndx
     }
     pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
