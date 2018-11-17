@@ -437,22 +437,10 @@ impl<'a> Elf<'a> {
           };
         // intern section and symbol name strings
         let (section_name, section_offset) = self.new_string(format!(".{}.{}", segment_name, name));
-        // can do prefix optimization here actually, because .text.*
-        let (idx, offset) = self.new_string(name.to_string());
         // store the size of this code
         let size = data.len();
-        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab
-        // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if prop.function { SymbolType::Function } else { SymbolType::Object })
-            .size(size)
-            .name_offset(offset)
-            .local(!prop.global)
-            .create();
-        symbol.st_shndx = shndx;
-        // insert it into our symbol table
-        self.symbols.insert(idx, symbol);
 
         // now we build the section a la LLVM "function sections"
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
@@ -482,7 +470,7 @@ impl<'a> Elf<'a> {
         // NB this is very brittle
         // - it means the entry is a sequence of 1 byte each, i.e., a cstring
         if !prop.function { section.sh_entsize = 1 };
-        self.sections.insert(idx, SectionInfo {
+        self.sections.insert(section_name, SectionInfo {
             header: section,
             symbol: section_symbol,
             name: section_name,
@@ -491,7 +479,20 @@ impl<'a> Elf<'a> {
         // increment the size
         self.sizeof_bits += size;
 
-        self.code.insert(idx, data);
+        self.code.insert(section_name, data);
+
+        // can do prefix optimization here actually, because .text.*
+        let (idx, offset) = self.new_string(name.to_string());
+        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        // build symbol based on this _and_ the properties of the definition
+        let mut symbol = SymbolBuilder::new(if prop.function { SymbolType::Function } else { SymbolType::Object })
+            .size(size)
+            .name_offset(offset)
+            .local(!prop.global)
+            .create();
+        symbol.st_shndx = shndx;
+        // insert it into our symbol table
+        self.symbols.insert(idx, symbol);
     }
     pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
         let (idx, offset) = self.new_string(name.to_string());
