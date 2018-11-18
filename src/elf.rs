@@ -518,7 +518,7 @@ impl<'a> Elf<'a> {
                         // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
                         Decl::Function {..} | Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
                         Decl::Data {..} => (reloc::R_X86_64_PC32, -4),
-                        Decl::CString {..} => (reloc::R_X86_64_PC32, 0),
+                        Decl::CString {..} => (reloc::R_X86_64_PC32, -4),
                         Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
                     }
                 },
