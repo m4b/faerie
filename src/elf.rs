@@ -494,7 +494,7 @@ impl<'a> Elf<'a> {
             .create(&self.ctx);
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
-        self.sections.insert(shndx, SectionInfo {
+        self.sections.insert(idx, SectionInfo {
             header: section,
             symbol: section_symbol,
             name: idx,
