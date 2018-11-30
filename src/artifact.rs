@@ -15,16 +15,20 @@ use mach;
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
 
+/// The kind of relocation for a link.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
-/// A raw relocation and its addend, to optionally override the "auto" relocation behavior of faerie.
-/// **NB**: This is implementation defined, and can break code invariants if used improperly, you have been warned.
-pub struct RelocOverride {
-    pub reloc: u32,
-    pub addend: i32,
+pub enum Reloc {
+    /// Automatic relocation determined by the `from` and `to` of the link.
+    Auto,
+    /// A raw relocation and its addend, to optionally override the "auto" relocation behavior of faerie.
+    /// **NB**: This is implementation defined, and can break code invariants if used improperly, you have been warned.
+    Raw { reloc: u32, addend: i32 },
+    /// A relocation in a debug section.
+    Debug { size: u8, addend: i32 },
 }
 
 type StringID = usize;
-type Relocation = (StringID, StringID, u64, Option<RelocOverride>);
+type Relocation = (StringID, StringID, u64, Reloc);
 
 /// The kinds of errors that can befall someone creating an Artifact
 #[derive(Fail, Debug)]
@@ -64,6 +68,7 @@ pub struct Prop {
     pub function: bool,
     pub writable: bool,
     pub cstring: bool,
+    pub section: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -87,7 +92,9 @@ pub enum Decl {
     /// A data object defined in this artifact
     Data { global: bool, writable: bool },
     /// A null-terminated string object defined in this artifact
-    CString { global: bool }
+    CString { global: bool },
+    /// A DWARF debug section defined in this artifact
+    DebugSection,
 }
 
 impl Decl {
@@ -159,6 +166,13 @@ impl Decl {
             _ => false,
         }
     }
+    /// Is this a section?
+    pub fn is_section(&self) -> bool {
+        match *self {
+            Decl::DebugSection {..} => true,
+            _ => false,
+        }
+    }
 }
 
 /// A declaration, plus a flag to track whether we have a definition for it yet
@@ -195,7 +209,7 @@ pub struct LinkAndDecl<'a> {
     pub from: Binding<'a>,
     pub to: Binding<'a>,
     pub at: u64,
-    pub reloc: Option<RelocOverride>,
+    pub reloc: Reloc,
 }
 
 /// A definition of a symbol with its properties the various backends receive
@@ -415,9 +429,10 @@ impl Artifact {
                     return Err(ArtifactError::DuplicateDefinition(name.as_ref().to_string()));
                 }
                 let prop = match stype.decl {
-                    Decl::CString { global } => Prop { global, function: false, writable: false, cstring: true },
-                    Decl::Data { global, writable } => Prop { global, function: false, writable, cstring: false },
-                    Decl::Function { global } => Prop { global, function: true, writable: false, cstring: false},
+                    Decl::CString { global } => Prop { global, function: false, writable: false, cstring: true, section: false },
+                    Decl::Data { global, writable } => Prop { global, function: false, writable, cstring: false, section: false },
+                    Decl::Function { global } => Prop { global, function: true, writable: false, cstring: false, section: false },
+                    Decl::DebugSection { .. } => Prop { global: false, function: false, writable: false, cstring: false, section: true},
                     _ if stype.decl.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
@@ -448,16 +463,11 @@ impl Artifact {
     /// **NB**: If either `link.from` or `link.to` is undeclared, then this will return an error.
     /// If `link.from` is an import you previously declared, this will also return an error.
     pub fn link<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
-        self.link_aux(link, None)
+        self.link_with(link, Reloc::Auto)
     }
-    /// A variant of `link` with a RelocOverride provided. Has all of the same invariants as
+    /// A variant of `link` with a `Reloc` provided. Has all of the same invariants as
     /// `link`.
-    pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: RelocOverride) -> Result<(), Error> {
-        self.link_aux(link, Some(reloc))
-    }
-
-    /// Shared implementation of `link` and `link_with`.
-    fn link_aux<'a>(&mut self, link: Link<'a>, reloc: Option<RelocOverride>) -> Result<(), Error> {
+    pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: Reloc) -> Result<(), Error> {
         let (link_from, link_to) = (self.strings.get_or_intern(link.from), self.strings.get_or_intern(link.to));
         match (self.declarations.get(&link_from), self.declarations.get(&link_to)) {
             (Some(ref from_type), Some(_)) => {

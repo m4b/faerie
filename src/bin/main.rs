@@ -1,4 +1,5 @@
 extern crate faerie;
+extern crate goblin;
 extern crate env_logger;
 extern crate structopt;
 #[macro_use]
@@ -10,7 +11,7 @@ use structopt::StructOpt;
 use failure::Error;
 use target_lexicon::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
 
-use faerie::{Link, ArtifactBuilder, Decl};
+use faerie::{Link, ArtifactBuilder, Decl, Reloc};
 use std::path::Path;
 use std::fs::File;
 use std::env;
@@ -44,6 +45,9 @@ pub struct Args {
     #[structopt(long = "library", help = "Output a static library (Unimplemented)")]
     library: bool,
 
+    #[structopt(long = "dwarf", help = "Emit some DWARF sections")]
+    dwarf: bool,
+
     #[structopt(help = "The filename to output")]
     filename: String,
 
@@ -71,17 +75,22 @@ fn run (args: Args) -> Result<(), Error> {
 
     // first we declare our symbolic references;
     // it is a runtime error to define a symbol _without_ declaring it first
-    obj.declarations(
-        [
-            ("deadbeef",   Decl::Function { global: false }),
-            ("main",       Decl::Function { global: true }),
-            ("str.1",      Decl::CString { global: false }),
-            ("DEADBEEF",   Decl::DataImport),
-            ("STATIC",     Decl::Data { global: true, writable: true }),
-            ("STATIC_REF", Decl::Data { global: true, writable: true }),
-            ("printf",     Decl::FunctionImport),
-        ].into_iter().cloned()
-    )?;
+    let mut declarations = vec![
+        ("deadbeef",   Decl::Function { global: false }),
+        ("main",       Decl::Function { global: true }),
+        ("str.1",      Decl::CString { global: false }),
+        ("DEADBEEF",   Decl::DataImport),
+        ("STATIC",     Decl::Data { global: true, writable: true }),
+        ("STATIC_REF", Decl::Data { global: true, writable: true }),
+        ("printf",     Decl::FunctionImport),
+    ];
+    if args.dwarf {
+        declarations.extend(&[
+            (".debug_info", Decl::DebugSection),
+            (".debug_str", Decl::DebugSection),
+        ]);
+    }
+    obj.declarations(declarations.into_iter())?;
 
     // we now define our local functions and data
     // 0000000000000000 <deadbeef>:
@@ -150,6 +159,13 @@ fn run (args: Args) -> Result<(), Error> {
     // .data static references need to be zero'd out explicitly for now.
     obj.define("STATIC_REF", vec![0; 8])?;
 
+    if args.dwarf {
+        // DWARF sections
+        // Contents have no meaning for now.
+        obj.define(".debug_info", vec![0; 0x10])?;
+        obj.define(".debug_str", vec![1; 0x10])?;
+    }
+
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
     // -- main relocations --
@@ -164,6 +180,22 @@ fn run (args: Args) -> Result<(), Error> {
     // -- static data relocations --
     // this is a reference to an object in the data section, so we are always at relative offset 0
     obj.link(Link { from: "STATIC_REF", to: "STATIC", at: 0 })?;
+
+    if args.dwarf {
+        // DWARF relocations
+        obj.link_with(
+            Link { from: ".debug_info", to: "main", at: 0},
+            Reloc::Debug { size: 8, addend: 0},
+        )?;
+        obj.link_with(
+            Link { from: ".debug_info", to: ".debug_info", at: 0x8},
+            Reloc::Debug { size: 4, addend: 0xc},
+        )?;
+        obj.link_with(
+            Link { from: ".debug_info", to: ".debug_str", at: 0xc},
+            Reloc::Debug { size: 4, addend: 0x4},
+        )?;
+    }
 
     // Finally, we emit the object file
     obj.write(file)?;
