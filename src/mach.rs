@@ -342,29 +342,28 @@ impl SymbolTable {
 #[derive(Debug)]
 /// A Mach-o program segment
 struct SegmentBuilder {
-    /// The sections that belong to this program segment; currently only 2 (text + data)
-    pub sections: [SectionBuilder; SegmentBuilder::NSECTIONS],
+    /// The sections that belong to this program segment
+    pub sections: IndexMap<String, SectionBuilder>,
     /// A stupid offset value I need to refactor out
     pub offset: u64,
     size: u64,
 }
 
 impl SegmentBuilder {
-    pub const NSECTIONS: usize = 3;
     /// The size of this segment's _data_, in bytes
     pub fn size(&self) -> u64 {
         self.size
     }
     /// The size of this segment's _load command_, including its associated sections, in bytes
-    pub fn load_command_size(ctx: &Ctx) -> u64 {
-        Segment::size_with(&ctx) as u64 + (Self::NSECTIONS as u64 * Section::size_with(&ctx) as u64)
+    pub fn load_command_size(&self, ctx: &Ctx) -> u64 {
+        Segment::size_with(&ctx) as u64 + (self.sections.len() as u64 * Section::size_with(&ctx) as u64)
     }
-    fn _section_data_file_offset(ctx: &Ctx) -> u64 {
+    fn _section_data_file_offset(&self, ctx: &Ctx) -> u64 {
         // section data
-        Header::size_with(&ctx.container) as u64 + Self::load_command_size(ctx)
+        Header::size_with(&ctx.container) as u64 + self.load_command_size(ctx)
     }
     // FIXME: this is in desperate need of refactoring, obviously
-    fn build_section(symtab: &mut SymbolTable, sectname: &'static str, segname: &'static str, offset: &mut u64, addr: &mut u64, symbol_offset: &mut u64, section: SectionIndex, definitions: &[Definition], alignment_exponent: u64, flags: Option<u32>) -> SectionBuilder {
+    fn build_section(symtab: &mut SymbolTable, sectname: &'static str, segname: &'static str, sections: &mut IndexMap<String, SectionBuilder>, offset: &mut u64, addr: &mut u64, symbol_offset: &mut u64, section: SectionIndex, definitions: &[Definition], alignment_exponent: u64, flags: Option<u32>) {
         let mut local_size = 0;
         let mut segment_relative_offset = 0;
         for def in definitions {
@@ -381,7 +380,7 @@ impl SegmentBuilder {
         }
         *offset += local_size;
         *addr += local_size;
-        section
+        sections.insert(sectname.to_string(), section);
     }
     /// Create a new program segment from an `artifact`, symbol table, and context
     // FIXME: this is pub(crate) for now because we can't leak pub(crate) Definition
@@ -389,16 +388,16 @@ impl SegmentBuilder {
         let mut offset = Header::size_with(&ctx.container) as u64;
         let mut size = 0;
         let mut symbol_offset = 0;
-        let text = Self::build_section(symtab, "__text", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code, 4, Some(S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
-        let data = Self::build_section(symtab, "__data", "__DATA", &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &data, 3, None);
-        let cstrings = Self::build_section(symtab, "__cstring", "__TEXT", &mut offset, &mut size, &mut symbol_offset, CSTRING_SECTION_INDEX, &cstrings, 0, Some(S_CSTRING_LITERALS));
+        let mut sections = IndexMap::new();
+        Self::build_section(symtab, "__text", "__TEXT", &mut sections, &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code, 4, Some(S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
+        Self::build_section(symtab, "__data", "__DATA", &mut sections, &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &data, 3, None);
+        Self::build_section(symtab, "__cstring", "__TEXT", &mut sections, &mut offset, &mut size, &mut symbol_offset, CSTRING_SECTION_INDEX, &cstrings, 0, Some(S_CSTRING_LITERALS));
         for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
         }
         // FIXME re add assert
         //assert_eq!(offset, Header::size_with(&ctx.container) + Self::load_command_size(ctx));
         debug!("Segment Size: {} Symtable LoadCommand Offset: {}", size, offset);
-        let sections = [text, data, cstrings];
         SegmentBuilder {
             size,
             sections,
@@ -468,7 +467,7 @@ impl<'a> Mach<'a> {
         // FIXME: this is ugly af, need cmdsize to get symtable offset
         // construct symtab command
         let mut symtab_load_command = SymtabCommand::new();
-        let segment_load_command_size = SegmentBuilder::load_command_size(&self.ctx);
+        let segment_load_command_size = self.segment.load_command_size(&self.ctx);
         let sizeof_load_commands = segment_load_command_size + symtab_load_command.cmdsize as u64;
         let symtable_offset = self.segment.offset + sizeof_load_commands;
         let strtable_offset = symtable_offset + (self.symtab.len() as u64 * Nlist::size_with(&self.ctx) as u64);
@@ -482,7 +481,7 @@ impl<'a> Mach<'a> {
         let mut raw_sections = Cursor::new(Vec::<u8>::new());
         let mut relocation_offset = relocation_offset_start;
         let mut section_offset = first_section_offset;
-        for (idx, section) in self.segment.sections.into_iter().cloned().enumerate() {
+        for (idx, section) in self.segment.sections.values().cloned().enumerate() {
             let mut section: Section = section.create();
             section.offset = section_offset as u32;
             section_offset += section.size;
