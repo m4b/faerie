@@ -609,7 +609,8 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
     for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.reloc);
         let (absolute, reloc) = match link.reloc {
-            Reloc::Auto => {
+            // TODO: support raw relocations
+            Reloc::Auto | Reloc::Raw { .. } => {
                 // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
                 // e.g., global static data references, are constructed from Data -> Data links
                 match (link.from.decl, link.to.decl) {
@@ -630,7 +631,6 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
                     (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
                 }
             }
-            Reloc::Raw { .. } => panic!("unimplemented Reloc::Raw"),
             Reloc::Debug { .. } => panic!("unimplemented Reloc::Debug"),
         };
         match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
