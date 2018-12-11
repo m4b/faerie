@@ -152,6 +152,7 @@ struct RelocationBuilder {
     symbol: SymbolIndex,
     relocation_offset: u64,
     absolute: bool,
+    size: u8,
     r_type: RelocType,
 }
 
@@ -162,6 +163,7 @@ impl RelocationBuilder {
             symbol,
             relocation_offset,
             absolute: false,
+            size: 0,
             r_type,
         }
     }
@@ -169,12 +171,21 @@ impl RelocationBuilder {
     pub fn absolute(mut self) -> Self {
         self.absolute = true; self
     }
+    /// The size in bytes of the relocated value (defaults to the address size).
+    pub fn size(mut self, size: u8) -> Self {
+        self.size = size; self
+    }
     /// Finalize and create the relocation
     pub fn create(self) -> RelocationInfo {
         // it basically goes sort of backwards than what you'd expect because C bitfields are bonkers
         let r_symbolnum: u32 = self.symbol as u32;
         let r_pcrel: u32 = if self.absolute { 0 } else { 1 } << 24;
-        let r_length: u32 = if self.absolute { 3 } else { 2 } << 25;
+        let r_length: u32 = match self.size {
+            0 => if self.absolute { 3 } else { 2 },
+            4 => 2,
+            8 => 3,
+            size => panic!("unsupported relocation size {}", size),
+        } << 25;
         let r_extern: u32 = 1 << 27;
         let r_type = (self.r_type as u32) << 28;
         // r_symbolnum, 24 bits, r_pcrel 1 bit, r_length 2 bits, r_extern 1 bit, r_type 4 bits
@@ -194,14 +205,14 @@ struct SectionBuilder {
     offset: u64,
     size: u64,
     flags: u32,
-    sectname: &'static str,
+    sectname: String,
     segname: &'static str,
     relocations: Vec<RelocationInfo>,
 }
 
 impl SectionBuilder {
     /// Create a new section builder with `sectname`, `segname` and `size`
-    pub fn new(sectname: &'static str, segname: &'static str, size: u64) -> Self {
+    pub fn new(sectname: String, segname: &'static str, size: u64) -> Self {
         SectionBuilder {
             addr: 0,
             align: 4,
@@ -232,7 +243,7 @@ impl SectionBuilder {
     /// Finalize and create the actual Mach-o section
     pub fn create(&self, section_offset: &mut u64, relocation_offset: &mut u64) -> Section {
         let mut sectname = [0u8; 16];
-        sectname.pwrite(self.sectname, 0).unwrap();
+        sectname.pwrite(&*self.sectname, 0).unwrap();
         let mut segname = [0u8; 16];
         segname.pwrite(self.segname, 0).unwrap();
         let mut section = Section {
@@ -384,7 +395,7 @@ impl SegmentBuilder {
             *symbol_offset += def.data.len() as u64;
             segment_relative_offset += def.data.len() as u64;
         }
-        let mut section = SectionBuilder::new(sectname, segname, local_size).offset(*offset).addr(*addr).align(alignment_exponent);
+        let mut section = SectionBuilder::new(sectname.to_string(), segname, local_size).offset(*offset).addr(*addr).align(alignment_exponent);
         if let Some(flags) = flags {
             section = section.flags(flags);
         }
@@ -392,9 +403,21 @@ impl SegmentBuilder {
         *addr += local_size;
         sections.insert(sectname.to_string(), section);
     }
+    fn build_debug_section(sections: &mut IndexMap<String, SectionBuilder>, offset: &mut u64, addr: &mut u64, def: &Definition) {
+        let sectname = if def.name.starts_with('.') {
+            format!("__{}", &def.name[1..])
+        } else {
+            def.name.to_string()
+        };
+        let local_size = def.data.len() as u64;
+        let section = SectionBuilder::new(sectname, "__DWARF", local_size).offset(*offset).addr(*addr);
+        *offset += local_size;
+        *addr += local_size;
+        sections.insert(def.name.to_string(), section);
+    }
     /// Create a new program segment from an `artifact`, symbol table, and context
     // FIXME: this is pub(crate) for now because we can't leak pub(crate) Definition
-    pub(crate) fn new(artifact: &Artifact, code: &[Definition], data: &[Definition], cstrings: &[Definition], symtab: &mut SymbolTable, ctx: &Ctx) -> Self {
+    pub(crate) fn new(artifact: &Artifact, code: &[Definition], data: &[Definition], cstrings: &[Definition], debug_sections: &[Definition], symtab: &mut SymbolTable, ctx: &Ctx) -> Self {
         let mut offset = Header::size_with(&ctx.container) as u64;
         let mut size = 0;
         let mut symbol_offset = 0;
@@ -402,6 +425,9 @@ impl SegmentBuilder {
         Self::build_section(symtab, "__text", "__TEXT", &mut sections, &mut offset, &mut size, &mut symbol_offset, CODE_SECTION_INDEX, &code, 4, Some(S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
         Self::build_section(symtab, "__data", "__DATA", &mut sections, &mut offset, &mut size, &mut symbol_offset, DATA_SECTION_INDEX, &data, 3, None);
         Self::build_section(symtab, "__cstring", "__TEXT", &mut sections, &mut offset, &mut size, &mut symbol_offset, CSTRING_SECTION_INDEX, &cstrings, 0, Some(S_CSTRING_LITERALS));
+        for def in debug_sections {
+            Self::build_debug_section(&mut sections, &mut offset, &mut size, def);
+        }
         for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
         }
@@ -426,6 +452,7 @@ struct Mach<'a> {
     code: ArtifactCode<'a>,
     data: ArtifactData<'a>,
     cstrings: Vec<Definition<'a>>,
+    debug: Vec<Definition<'a>>,
     _p: ::std::marker::PhantomData<&'a ()>,
 }
 
@@ -433,9 +460,11 @@ impl<'a> Mach<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         // FIXME: I believe we can avoid this partition by refactoring SegmentBuilder::new
-        let (mut code, mut data, mut cstrings) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut code, mut data, mut cstrings, mut debug) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for def in artifact.definitions() {
-            if def.prop.function {
+            if def.prop.section {
+                debug.push(def);
+            } else if def.prop.function {
                 code.push(def);
             } else if def.prop.cstring {
                 cstrings.push(def)
@@ -445,7 +474,7 @@ impl<'a> Mach<'a> {
         }
 
         let mut symtab = SymbolTable::new();
-        let mut segment = SegmentBuilder::new(&artifact, &code, &data, &cstrings, &mut symtab, &ctx);
+        let mut segment = SegmentBuilder::new(&artifact, &code, &data, &cstrings, &debug, &mut symtab, &ctx);
         build_relocations(&mut segment, &artifact, &symtab);
 
         Mach {
@@ -457,6 +486,7 @@ impl<'a> Mach<'a> {
             code,
             data,
             cstrings,
+            debug,
         }
     }
     fn header(&self, sizeofcmds: u64) -> Header {
@@ -555,6 +585,14 @@ impl<'a> Mach<'a> {
         debug!("SEEK: after cstrings: {}", file.seek(Current(0))?);
 
         //////////////////////////////
+        // write debug sections
+        //////////////////////////////
+        for debug in self.debug {
+            file.write_all(debug.data)?;
+        }
+        debug!("SEEK: after debug: {}", file.seek(Current(0))?);
+
+        //////////////////////////////
         // write symtable
         //////////////////////////////
         for (idx, symbol) in self.symtab.symbols.into_iter() {
@@ -604,12 +642,12 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
     debug!("Generating relocations");
     for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.reloc);
-        let (absolute, reloc) = match link.reloc {
+        match link.reloc {
             // TODO: support raw relocations
             Reloc::Auto | Reloc::Raw { .. } => {
                 // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
                 // e.g., global static data references, are constructed from Data -> Data links
-                match (link.from.decl, link.to.decl) {
+                let (absolute, reloc) = match (link.from.decl, link.to.decl) {
                     (&Decl::DebugSection {..}, _) => panic!("must use Reloc::Debug for debug section links"),
                     // only debug sections should link to debug sections
                     (_, &Decl::DebugSection {..}) => panic!("invalid DebugSection link"),
@@ -625,24 +663,36 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                     (_, &Decl::CString {..}) => (false, X86_64_RELOC_SIGNED),
                     (_, &Decl::FunctionImport) => (false, X86_64_RELOC_BRANCH),
                     (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
+                };
+                match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
+                    (Some(base_offset), Some(to_symbol_index)) => {
+                        debug!("{} offset: {}", link.to.name, base_offset + link.at);
+                        let builder = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc);
+                        // NB: we currently associate absolute relocations with data relocations; this may prove
+                        // too fragile for future additions; needs analysis
+                        if absolute {
+                            segment.sections.get_index_mut(data_idx).unwrap().1.relocations.push(builder.absolute().create());
+                        } else {
+                            segment.sections.get_index_mut(text_idx).unwrap().1.relocations.push(builder.create());
+                        }
+                    },
+                    _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
                 }
             }
-            Reloc::Debug { .. } => panic!("unimplemented Reloc::Debug"),
-        };
-        match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
-            (Some(base_offset), Some(to_symbol_index)) => {
-                debug!("{} offset: {}", link.to.name, base_offset + link.at);
-                let builder = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc);
-                // NB: we currently associate absolute relocations with data relocations; this may prove
-                // too fragile for future additions; needs analysis
-                if absolute {
-                    segment.sections.get_index_mut(data_idx).unwrap().1.relocations.push(builder.absolute().create());
+            Reloc::Debug { size, .. } => {
+                if link.to.decl.is_section() {
+                    // TODO: not sure if these are needed for Mach
                 } else {
-                    segment.sections.get_index_mut(text_idx).unwrap().1.relocations.push(builder.create());
+                    match symtab.index(link.to.name) {
+                        Some(to_symbol_index) => {
+                            let builder = RelocationBuilder::new(to_symbol_index, link.at, X86_64_RELOC_UNSIGNED).absolute().size(size);
+                            segment.sections[link.from.name].relocations.push(builder.create());
+                        }
+                        _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
+                    }
                 }
-            },
-            _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
-        }
+            }
+        };
     }
 }
 
