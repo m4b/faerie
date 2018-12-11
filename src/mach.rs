@@ -196,6 +196,7 @@ struct SectionBuilder {
     flags: u32,
     sectname: &'static str,
     segname: &'static str,
+    relocations: Vec<RelocationInfo>,
 }
 
 impl SectionBuilder {
@@ -209,6 +210,7 @@ impl SectionBuilder {
             size,
             sectname,
             segname,
+            relocations: Vec::new(),
         }
     }
     /// Set the vm address of this section
@@ -228,12 +230,12 @@ impl SectionBuilder {
         self.flags = flags; self
     }
     /// Finalize and create the actual Mach-o section
-    pub fn create(self) -> Section {
+    pub fn create(&self, section_offset: &mut u64, relocation_offset: &mut u64) -> Section {
         let mut sectname = [0u8; 16];
         sectname.pwrite(self.sectname, 0).unwrap();
         let mut segname = [0u8; 16];
         segname.pwrite(self.segname, 0).unwrap();
-        Section {
+        let mut section = Section {
             sectname,
             segname,
             addr: self.addr,
@@ -244,7 +246,16 @@ impl SectionBuilder {
             reloff: 0,
             nreloc: 0,
             flags: self.flags
+        };
+        section.offset = *section_offset as u32;
+        *section_offset += section.size;
+        if !self.relocations.is_empty() {
+            let nrelocs = self.relocations.len();
+            section.nreloc = nrelocs as _;
+            section.reloff = *relocation_offset as u32;
+            *relocation_offset += nrelocs as u64 * SIZEOF_RELOCATION_INFO as u64;
         }
+        section
     }
 }
 
@@ -254,7 +265,6 @@ type ArtifactData<'a> = Vec<Definition<'a>>;
 type StrTableIndex = usize;
 type StrTable = DefaultStringInterner;
 type Symbols = IndexMap<StrTableIndex, SymbolBuilder>;
-type Relocations = Vec<Vec<RelocationInfo>>;
 
 /// A mach object symbol table
 #[derive(Debug, Default)]
@@ -413,7 +423,6 @@ struct Mach<'a> {
     architecture: Architecture,
     symtab: SymbolTable,
     segment: SegmentBuilder,
-    relocations: Relocations,
     code: ArtifactCode<'a>,
     data: ArtifactData<'a>,
     cstrings: Vec<Definition<'a>>,
@@ -436,15 +445,14 @@ impl<'a> Mach<'a> {
         }
 
         let mut symtab = SymbolTable::new();
-        let segment = SegmentBuilder::new(&artifact, &code, &data, &cstrings, &mut symtab, &ctx);
-        let relocations = build_relocations(&artifact, &symtab);
+        let mut segment = SegmentBuilder::new(&artifact, &code, &data, &cstrings, &mut symtab, &ctx);
+        build_relocations(&mut segment, &artifact, &symtab);
 
         Mach {
             ctx,
             architecture: artifact.target.architecture,
             symtab,
             segment,
-            relocations,
             _p: ::std::marker::PhantomData::default(),
             code,
             data,
@@ -481,21 +489,10 @@ impl<'a> Mach<'a> {
         let mut raw_sections = Cursor::new(Vec::<u8>::new());
         let mut relocation_offset = relocation_offset_start;
         let mut section_offset = first_section_offset;
-        for (idx, section) in self.segment.sections.values().cloned().enumerate() {
-            let mut section: Section = section.create();
-            section.offset = section_offset as u32;
-            section_offset += section.size;
-            debug!("{}: Setting nrelocs", idx);
-            // relocations are tied to segment/sections
-            // TODO: move this also into SegmentBuilder
-            if idx < self.relocations.len() {
-                let nrelocs = self.relocations[idx].len();
-                section.nreloc = nrelocs as _;
-                section.reloff = relocation_offset as u32;
-                relocation_offset += nrelocs as u64 * SIZEOF_RELOCATION_INFO as u64;
-            }
-            debug!("Section: {:#?}", section);
-            raw_sections.iowrite_with(section, self.ctx)?;
+        for section in self.segment.sections.values() {
+            let mut header = section.create(&mut section_offset, &mut relocation_offset);
+            debug!("Section: {:#?}", header);
+            raw_sections.iowrite_with(header, self.ctx)?;
         }
         let raw_sections = raw_sections.into_inner();
         debug!("Raw sections len: {} - Section start: {} Strtable size: {} - Segment size: {}", raw_sections.len(), first_section_offset, self.symtab.sizeof_strtable(), self.segment.size());
@@ -584,9 +581,9 @@ impl<'a> Mach<'a> {
         //////////////////////////////
         // write relocations
         //////////////////////////////
-        for section_relocations in self.relocations.into_iter() {
-            debug!("Relocations: {}", section_relocations.len());
-            for reloc in section_relocations.into_iter() {
+        for section in self.segment.sections.values() {
+            debug!("Relocations: {}", section.relocations.len());
+            for reloc in section.relocations.iter().cloned() {
                 debug!("  {:?}", reloc);
                 file.iowrite_with(reloc, self.ctx.le)?;
             }
@@ -600,10 +597,10 @@ impl<'a> Mach<'a> {
 }
 
 // FIXME: this should actually return a runtime error if we encounter a from.decl to.decl pair which we don't explicitly match on
-fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
+fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: &SymbolTable) {
     use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_UNSIGNED, X86_64_RELOC_GOT_LOAD};
-    let mut text_relocations = Vec::new();
-    let mut data_relocations = Vec::new();
+    let text_idx = segment.sections.get_full("__text").unwrap().0;
+    let data_idx = segment.sections.get_full("__data").unwrap().0;
     debug!("Generating relocations");
     for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.reloc);
@@ -639,15 +636,14 @@ fn build_relocations(artifact: &Artifact, symtab: &SymbolTable) -> Relocations {
                 // NB: we currently associate absolute relocations with data relocations; this may prove
                 // too fragile for future additions; needs analysis
                 if absolute {
-                    data_relocations.push(builder.absolute().create());
+                    segment.sections.get_index_mut(data_idx).unwrap().1.relocations.push(builder.absolute().create());
                 } else {
-                    text_relocations.push(builder.create());
+                    segment.sections.get_index_mut(text_idx).unwrap().1.relocations.push(builder.create());
                 }
             },
             _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
         }
     }
-    vec![text_relocations, data_relocations]
 }
 
 pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
