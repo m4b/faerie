@@ -75,7 +75,7 @@ fn run (args: Args) -> Result<(), Error> {
 
     // first we declare our symbolic references;
     // it is a runtime error to define a symbol _without_ declaring it first
-    let mut declarations = vec![
+    let declarations = vec![
         ("deadbeef",   Decl::Function { global: false }),
         ("main",       Decl::Function { global: true }),
         ("str.1",      Decl::CString { global: false }),
@@ -84,12 +84,6 @@ fn run (args: Args) -> Result<(), Error> {
         ("STATIC_REF", Decl::Data { global: true, writable: true }),
         ("printf",     Decl::FunctionImport),
     ];
-    if args.dwarf {
-        declarations.extend(&[
-            (".debug_info", Decl::DebugSection),
-            (".debug_str", Decl::DebugSection),
-        ]);
-    }
     obj.declarations(declarations.into_iter())?;
 
     // we now define our local functions and data
@@ -159,13 +153,6 @@ fn run (args: Args) -> Result<(), Error> {
     // .data static references need to be zero'd out explicitly for now.
     obj.define("STATIC_REF", vec![0; 8])?;
 
-    if args.dwarf {
-        // DWARF sections
-        // Contents have no meaning for now.
-        obj.define(".debug_info", vec![0; 0x10])?;
-        obj.define(".debug_str", vec![1; 0x10])?;
-    }
-
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
     // -- main relocations --
@@ -180,22 +167,6 @@ fn run (args: Args) -> Result<(), Error> {
     // -- static data relocations --
     // this is a reference to an object in the data section, so we are always at relative offset 0
     obj.link(Link { from: "STATIC_REF", to: "STATIC", at: 0 })?;
-
-    if args.dwarf {
-        // DWARF relocations
-        obj.link_with(
-            Link { from: ".debug_info", to: "main", at: 0},
-            Reloc::Debug { size: 8, addend: 0},
-        )?;
-        obj.link_with(
-            Link { from: ".debug_info", to: ".debug_info", at: 0x8},
-            Reloc::Debug { size: 4, addend: 0xc},
-        )?;
-        obj.link_with(
-            Link { from: ".debug_info", to: ".debug_str", at: 0xc},
-            Reloc::Debug { size: 4, addend: 0x4},
-        )?;
-    }
 
     // Finally, we emit the object file
     obj.write(file)?;
@@ -228,6 +199,152 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
     obj.declare("DEADBEEF", Decl::Data { global: true, writable: false })?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
+
+    if args.dwarf {
+        // DWARF sections
+        obj.declare(".debug_abbrev", Decl::DebugSection)?;
+        obj.declare(".debug_info", Decl::DebugSection)?;
+        obj.declare(".debug_str", Decl::DebugSection)?;
+
+        obj.define(".debug_str",
+            concat![
+                // 0x00:
+                "faerie\0",
+                // 0x07:
+                "/faerie/reference\0",
+                // 0x19:
+                "deadbeef.c\0",
+                // 0x24:
+                "DEADBEEF\0",
+            ].as_bytes().to_vec())?;
+        obj.define(".debug_abbrev",
+            vec![
+                // Abbrev 1: DW_TAG_compile_unit, DW_CHILDREN_yes
+                0x01, 0x11, 0x01,
+                // DW_AT_producer, DW_FORM_strp
+                0x25, 0x0e,
+                // DW_AT_language, DW_FORM_data1
+                0x13, 0x0b,
+                // DW_AT_name, DW_FORM_strp
+                0x03, 0x0e,
+                // DW_AT_comp_dir, DW_FORM_strp
+                0x1b, 0x0e,
+                // null
+                0x00, 0x00,
+
+                // Abbrev 2: DW_TAG_variable, DW_CHILDREN_no
+                0x02, 0x34, 0x00,
+                // DW_AT_name, DW_FORM_strp
+                0x03, 0x0e,
+                // DW_AT_type, DW_FORM_ref4
+                0x49, 0x13,
+                // DW_AT_external, DW_FORM_flag_present
+                0x3f, 0x19,
+                // DW_AT_location, DW_FORM_exprloc
+                0x02, 0x18,
+                // null
+                0x00, 0x00,
+
+                // Abbrev 3: DW_TAG_base_type, DW_CHILDREN_no
+                0x03, 0x24, 0x00,
+                // DW_AT_name, DW_FORM_string
+                0x03, 0x08,
+                // DW_AT_byte_size, DW_FORM_data1
+                0x0b, 0x0b,
+                // DW_AT_encoding, DW_FORM_data1
+                0x3e, 0x0b,
+                // null
+                0x00, 0x00,
+
+                // null
+                0x00,
+            ])?;
+        let mut debug_info =
+            vec![
+                // 0x00: Length = 0x34 - 4
+                0x30, 0x00, 0x00, 0x00,
+                // 0x04: Version
+                0x04, 0x00,
+                // 0x06: Abbrev offset (needs reloc)
+                0x00, 0x00, 0x00, 0x00,
+                // 0x0a: Address size
+                0x08,
+
+                // 0x0b: Abbrev 1 = DW_TAG_compile_unit
+                0x01,
+                // 0x0c: DW_AT_producer = 0x00 (needs reloc)
+                0x00, 0x00, 0x00, 0x00,
+                // 0x10: DW_AT_language = DW_LANG_C
+                0x02,
+                // 0x11: DW_AT_name = 0x19 (needs reloc)
+                0x00, 0x00, 0x00, 0x00,
+                // 0x15: DW_AT_comp_dir = 0x07 (needs reloc)
+                0x00, 0x00, 0x00, 0x00,
+
+                // 0x19: Abbrev 2 = DW_TAG_variable
+                0x02,
+                // 0x1a: DW_AT_name = 0x24 (needs reloc)
+                0x00, 0x00, 0x00, 0x00,
+                // 0x1e: DW_AT_type = offset of int base_type
+                0x2c, 0x00, 0x00, 0x00,
+                // 0x22: DW_FORM_flag_present = no data needed
+                // 0x22: DW_AT_location = len 9, DW_OP_addr DEADBEEF (needs reloc)
+                0x09, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+                // 0x2c: Abbrev 3 = DW_TAG_base_type
+                0x03,
+                // 0x2d: DW_AT_name = "int"
+                b'i', b'n', b't', 0x00,
+                // 0x31: DW_AT_byte_size = 4
+                0x04,
+                // 0x32: DW_AT_encoding = DW_ATE_signed
+                0x05,
+
+                // 0x33: End of children
+                0x00,
+            ];
+
+        if args.mach {
+            // No relocation needed for Mach.
+            debug_info[0x11] = 0x19;
+            debug_info[0x15] = 0x7;
+            debug_info[0x1a] = 0x24;
+        } else {
+            // abbrev offset
+            obj.link_with(
+                Link { from: ".debug_info", to: ".debug_abbrev", at: 0x06},
+                Reloc::Debug { size: 4, addend: 0x0},
+            )?;
+            // producer
+            obj.link_with(
+                Link { from: ".debug_info", to: ".debug_str", at: 0x0c},
+                Reloc::Debug { size: 4, addend: 0x0},
+            )?;
+            // CU name
+            obj.link_with(
+                Link { from: ".debug_info", to: ".debug_str", at: 0x11},
+                Reloc::Debug { size: 4, addend: 0x19},
+            )?;
+            // comp dir
+            obj.link_with(
+                Link { from: ".debug_info", to: ".debug_str", at: 0x15},
+                Reloc::Debug { size: 4, addend: 0x7},
+            )?;
+            // var name
+            obj.link_with(
+                Link { from: ".debug_info", to: ".debug_str", at: 0x1a},
+                Reloc::Debug { size: 4, addend: 0x24},
+            )?;
+        }
+        // var location
+        obj.link_with(
+            Link { from: ".debug_info", to: "DEADBEEF", at: 0x24},
+            Reloc::Debug { size: 8, addend: 0x0},
+        )?;
+
+        obj.define(".debug_info", debug_info)?;
+    }
+
     obj.write(file)?;
     if let Some(output) = args.link {
         link(&args.filename, &output, &args.linkline)?;
