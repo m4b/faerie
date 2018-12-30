@@ -513,7 +513,7 @@ impl<'a> Mach<'a> {
         let first_section_offset = Header::size_with(&self.ctx) as u64 + sizeof_load_commands;
         // start with setting the headers dependent value
         let header = self.header(sizeof_load_commands);
-        
+
         debug!("Symtable: {:#?}", self.symtab);
         // marshall the sections into something we can actually write
         let mut raw_sections = Cursor::new(Vec::<u8>::new());
@@ -636,18 +636,19 @@ impl<'a> Mach<'a> {
 
 // FIXME: this should actually return a runtime error if we encounter a from.decl to.decl pair which we don't explicitly match on
 fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: &SymbolTable) {
-    use goblin::mach::relocation::{X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_UNSIGNED, X86_64_RELOC_GOT_LOAD};
+    use goblin::mach::relocation::{
+        R_ABS, X86_64_RELOC_BRANCH, X86_64_RELOC_SIGNED, X86_64_RELOC_UNSIGNED, X86_64_RELOC_GOT_LOAD
+    };
     let text_idx = segment.sections.get_full("__text").unwrap().0;
     let data_idx = segment.sections.get_full("__data").unwrap().0;
     debug!("Generating relocations");
     for link in artifact.links() {
         debug!("Import links for: from {} to {} at {:#x} with {:?}", link.from.name, link.to.name, link.at, link.reloc);
-        match link.reloc {
-            // TODO: support raw relocations
-            Reloc::Auto | Reloc::Raw { .. } => {
+        let (absolute, reloc) = match link.reloc {
+            Reloc::Auto => {
                 // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
                 // e.g., global static data references, are constructed from Data -> Data links
-                let (absolute, reloc) = match (link.from.decl, link.to.decl) {
+                match (link.from.decl, link.to.decl) {
                     (&Decl::DebugSection {..}, _) => panic!("must use Reloc::Debug for debug section links"),
                     // only debug sections should link to debug sections
                     (_, &Decl::DebugSection {..}) => panic!("invalid DebugSection link"),
@@ -663,20 +664,14 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                     (_, &Decl::CString {..}) => (false, X86_64_RELOC_SIGNED),
                     (_, &Decl::FunctionImport) => (false, X86_64_RELOC_BRANCH),
                     (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
-                };
-                match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
-                    (Some(base_offset), Some(to_symbol_index)) => {
-                        debug!("{} offset: {}", link.to.name, base_offset + link.at);
-                        let builder = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc);
-                        // NB: we currently associate absolute relocations with data relocations; this may prove
-                        // too fragile for future additions; needs analysis
-                        if absolute {
-                            segment.sections.get_index_mut(data_idx).unwrap().1.relocations.push(builder.absolute().create());
-                        } else {
-                            segment.sections.get_index_mut(text_idx).unwrap().1.relocations.push(builder.create());
-                        }
-                    },
-                    _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
+                }
+            }
+            Reloc::Raw { reloc, addend } => {
+                debug_assert!(reloc <= u8::max_value() as u32);
+                assert!(addend == 0);
+                match reloc as u8 {
+                    R_ABS => (true, R_ABS),
+                    reloc => (false, reloc),
                 }
             }
             Reloc::Debug { size, .. } => {
@@ -691,8 +686,23 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                         _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
                     }
                 }
+                return;
             }
         };
+        match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
+            (Some(base_offset), Some(to_symbol_index)) => {
+                debug!("{} offset: {}", link.to.name, base_offset + link.at);
+                let builder = RelocationBuilder::new(to_symbol_index, base_offset + link.at, reloc);
+                // NB: we currently associate absolute relocations with data relocations; this may prove
+                // too fragile for future additions; needs analysis
+                if absolute {
+                    segment.sections.get_index_mut(data_idx).unwrap().1.relocations.push(builder.absolute().create());
+                } else {
+                    segment.sections.get_index_mut(text_idx).unwrap().1.relocations.push(builder.create());
+                }
+            },
+            _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
+        }
     }
 }
 
