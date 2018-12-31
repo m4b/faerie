@@ -20,7 +20,7 @@ use goblin::mach::load_command::SymtabCommand;
 use goblin::mach::header::{Header, MH_OBJECT, MH_SUBSECTIONS_VIA_SYMBOLS};
 use goblin::mach::symbols::Nlist;
 use goblin::mach::relocation::{RelocationInfo, RelocType, SIZEOF_RELOCATION_INFO};
-use goblin::mach::constants::{S_REGULAR, S_CSTRING_LITERALS, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS};
+use goblin::mach::constants::{S_REGULAR, S_CSTRING_LITERALS, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS, S_ATTR_DEBUG};
 
 struct CpuType(cputype::CpuType);
 
@@ -410,7 +410,7 @@ impl SegmentBuilder {
             def.name.to_string()
         };
         let local_size = def.data.len() as u64;
-        let section = SectionBuilder::new(sectname, "__DWARF", local_size).offset(*offset).addr(*addr);
+        let section = SectionBuilder::new(sectname, "__DWARF", local_size).offset(*offset).addr(*addr).align(1).flags(S_ATTR_DEBUG);
         *offset += local_size;
         *addr += local_size;
         sections.insert(def.name.to_string(), section);

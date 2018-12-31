@@ -21,7 +21,7 @@ use indexmap::IndexMap;
 use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
-use goblin::elf::section_header::{SectionHeader};
+use goblin::elf::section_header::{self, SectionHeader};
 use goblin::elf::reloc;
 
 // interned string idx
@@ -474,8 +474,13 @@ impl<'a> Elf<'a> {
         self.symbols.insert(idx, symbol);
     }
     pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
+        let stype = if name == ".debug_str" || name == ".debug_line_str" {
+            SectionType::String
+        } else {
+            SectionType::Bits
+        };
         let section = SectionBuilder::new(data.len() as u64)
-            .section_type(SectionType::Bits);
+            .section_type(stype);
         self.add_progbits(name.to_string(), section, data);
     }
     /// Create a progbits section (and its section symbol), and return the section index.
@@ -611,6 +616,7 @@ impl<'a> Elf<'a> {
             reloc_section.sh_link = SYMTAB_LINK as u32;
             // info tells us which section these relocations apply to
             reloc_section.sh_info = shndx as u32;
+            reloc_section.sh_flags |= section_header::SHF_INFO_LINK as u64;
             self.relocations.insert(shndx, (reloc_section, vec![reloc]));
             self.nsections += 1;
         }
