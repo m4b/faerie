@@ -21,7 +21,7 @@ use indexmap::IndexMap;
 use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
-use goblin::elf::section_header::{SectionHeader};
+use goblin::elf::section_header::{self, SectionHeader};
 use goblin::elf::reloc;
 
 // interned string idx
@@ -611,6 +611,7 @@ impl<'a> Elf<'a> {
             reloc_section.sh_link = SYMTAB_LINK as u32;
             // info tells us which section these relocations apply to
             reloc_section.sh_info = shndx as u32;
+            reloc_section.sh_flags |= section_header::SHF_INFO_LINK as u64;
             self.relocations.insert(shndx, (reloc_section, vec![reloc]));
             self.nsections += 1;
         }
