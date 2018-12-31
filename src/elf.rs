@@ -474,8 +474,13 @@ impl<'a> Elf<'a> {
         self.symbols.insert(idx, symbol);
     }
     pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
+        let stype = if name == ".debug_str" || name == ".debug_line_str" {
+            SectionType::String
+        } else {
+            SectionType::Bits
+        };
         let section = SectionBuilder::new(data.len() as u64)
-            .section_type(SectionType::Bits);
+            .section_type(stype);
         self.add_progbits(name.to_string(), section, data);
     }
     /// Create a progbits section (and its section symbol), and return the section index.
