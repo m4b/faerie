@@ -686,7 +686,7 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                         _ => error!("Import Relocation from {} to {} at {:#x} has a missing symbol. Dumping symtab {:?}", link.from.name, link.to.name, link.at, symtab)
                     }
                 }
-                return;
+                continue;
             }
         };
         match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
