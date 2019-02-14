@@ -7,9 +7,7 @@
 
 use goblin;
 use failure::Error;
-use {artifact, Artifact, Decl, Ctx, ImportKind};
-use artifact::{LinkAndDecl, Reloc};
-use target::make_ctx;
+use crate::{artifact::{self, LinkAndDecl, Reloc}, Artifact, Decl, Ctx, ImportKind, target::make_ctx};
 
 use std::collections::{HashMap, hash_map};
 use std::fmt;

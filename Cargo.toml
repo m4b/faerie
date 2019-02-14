@@ -10,6 +10,7 @@ description = "ELF and Mach-o native binary object file emitter"
 documentation = "https://docs.rs/faerie"
 categories = ["development-tools::debugging"]
 include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md", "tests/*"]
+edition = "2018"
 
 [[bin]]
 name = "prototype"

@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types)]
 
-use container;
-use Ctx;
+use crate::container;
+use crate::Ctx;
 use target_lexicon::{Triple, PointerWidth, Endianness};
 
 pub fn make_ctx(target: &Triple) -> Ctx {

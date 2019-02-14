@@ -1,13 +1,12 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use {Artifact, Ctx};
-use artifact::{Decl, Definition, Reloc};
-use target::make_ctx;
+use crate::{Artifact, Ctx};
+use crate::artifact::{Decl, Definition, Reloc};
+use crate::target::make_ctx;
 
 use failure::Error;
 use indexmap::IndexMap;
 use string_interner::{DefaultStringInterner};
-//use std::collections::HashMap;
 use std::io::{Seek, Cursor, BufWriter, Write};
 use std::io::SeekFrom::*;
 use scroll::{Pwrite, IOwrite};
@@ -27,7 +26,7 @@ struct CpuType(cputype::CpuType);
 impl From<Architecture> for CpuType {
     fn from(architecture: Architecture) -> CpuType {
         use target_lexicon::Architecture::*;
-        use mach::cputype::*;
+        use goblin::mach::cputype::*;
         CpuType(match architecture {
             X86_64 => CPU_TYPE_X86_64,
             I386 |
@@ -520,7 +519,7 @@ impl<'a> Mach<'a> {
         let mut relocation_offset = relocation_offset_start;
         let mut section_offset = first_section_offset;
         for section in self.segment.sections.values() {
-            let mut header = section.create(&mut section_offset, &mut relocation_offset);
+            let header = section.create(&mut section_offset, &mut relocation_offset);
             debug!("Section: {:#?}", header);
             raw_sections.iowrite_with(header, self.ctx)?;
         }
