@@ -1,13 +1,13 @@
 //! An artifact is a platform independent binary object file format abstraction.
 
-use string_interner::DefaultStringInterner;
-use indexmap::IndexMap;
 use failure::Error;
-use target_lexicon::{Triple, BinaryFormat};
+use indexmap::IndexMap;
+use string_interner::DefaultStringInterner;
+use target_lexicon::{BinaryFormat, Triple};
 
-use std::io::Write;
-use std::fs::File;
 use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::Write;
 
 use crate::{elf, mach};
 
@@ -39,7 +39,10 @@ pub enum ArtifactError {
     #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
     RelocateImport(String),
     // FIXME: don't use debugging prints for decl formats
-    #[fail(display = "Incompatible declarations, old declaration {:?} is incompatible with new {:?}", old, new)]
+    #[fail(
+        display = "Incompatible declarations, old declaration {:?} is incompatible with new {:?}",
+        old, new
+    )]
     /// An incompatble declaration occurred, please see the [absorb](enum.Decl.html#method.absorb) method on `Decl`
     IncompatibleDeclaration { old: Decl, new: Decl },
     #[fail(display = "duplicate definition of symbol: {}", _0)]
@@ -116,43 +119,75 @@ impl Decl {
             Decl::DataImport => {
                 match other {
                     // data imports can be upgraded to any kind of data declaration
-                    Decl::Data { .. } => { *self = other; Ok(()) }
+                    Decl::Data { .. } => {
+                        *self = other;
+                        Ok(())
+                    }
                     Decl::DataImport => Ok(()),
-                    _ => Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into()),
+                    _ => Err(ArtifactError::IncompatibleDeclaration {
+                        old: *self,
+                        new: other,
+                    }
+                    .into()),
                 }
             }
             Decl::FunctionImport => {
                 match other {
                     // function imports can be upgraded to any kind of function declaration
-                    Decl::Function { .. } => { *self = other; Ok(()) }
-                    Decl::FunctionImport => Ok(()),
-                    _ => Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into()),
-                }
-            },
-            // a previous data declaration can only be re-declared a data import, or it must match exactly the
-            // next declaration
-            decl@Decl::Data { .. } => {
-                match other {
-                    Decl::DataImport => Ok(()),
-                    other => if decl == other { Ok(()) } else {
-                        Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into())
+                    Decl::Function { .. } => {
+                        *self = other;
+                        Ok(())
                     }
+                    Decl::FunctionImport => Ok(()),
+                    _ => Err(ArtifactError::IncompatibleDeclaration {
+                        old: *self,
+                        new: other,
+                    }
+                    .into()),
                 }
             }
-            // a previous function decl can only be re-declared a function import, or it must match exactly
-            // the next declaration
-            decl@Decl::Function { .. } => {
-                match other {
-                    Decl::FunctionImport => Ok(()),
-                    other => {
-                        if decl == other { Ok(()) } else {
-                            Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into())
+            // a previous data declaration can only be re-declared a data import, or it must match exactly the
+            // next declaration
+            decl @ Decl::Data { .. } => match other {
+                Decl::DataImport => Ok(()),
+                other => {
+                    if decl == other {
+                        Ok(())
+                    } else {
+                        Err(ArtifactError::IncompatibleDeclaration {
+                            old: *self,
+                            new: other,
                         }
-                    },
+                        .into())
+                    }
                 }
             },
-            decl => if decl == other { Ok(()) } else {
-                Err(ArtifactError::IncompatibleDeclaration { old:*self, new: other }.into())
+            // a previous function decl can only be re-declared a function import, or it must match exactly
+            // the next declaration
+            decl @ Decl::Function { .. } => match other {
+                Decl::FunctionImport => Ok(()),
+                other => {
+                    if decl == other {
+                        Ok(())
+                    } else {
+                        Err(ArtifactError::IncompatibleDeclaration {
+                            old: *self,
+                            new: other,
+                        }
+                        .into())
+                    }
+                }
+            },
+            decl => {
+                if decl == other {
+                    Ok(())
+                } else {
+                    Err(ArtifactError::IncompatibleDeclaration {
+                        old: *self,
+                        new: other,
+                    }
+                    .into())
+                }
             }
         }
     }
@@ -168,7 +203,7 @@ impl Decl {
     /// Is this a section?
     pub fn is_section(&self) -> bool {
         match *self {
-            Decl::DebugSection {..} => true,
+            Decl::DebugSection { .. } => true,
             _ => false,
         }
     }
@@ -222,7 +257,9 @@ pub(crate) struct Definition<'a> {
 impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
     fn from((def, strings): (&'a InternalDefinition, &'a DefaultStringInterner)) -> Self {
         Definition {
-            name: strings.resolve(def.name).expect("internal definition to have name"),
+            name: strings
+                .resolve(def.name)
+                .expect("internal definition to have name"),
             data: &def.data,
             prop: &def.prop,
         }
@@ -251,13 +288,9 @@ pub enum ImportKind {
 impl ImportKind {
     fn from_decl(decl: &Decl) -> Option<Self> {
         match decl {
-            &Decl::DataImport => {
-                Some (ImportKind::Data)
-            },
-            &Decl::FunctionImport => {
-                Some (ImportKind::Function)
-            },
-            _ => None
+            &Decl::DataImport => Some(ImportKind::Data),
+            &Decl::FunctionImport => Some(ImportKind::Function),
+            _ => None,
         }
     }
 }
@@ -336,30 +369,56 @@ impl Artifact {
     }
     /// Get an iterator over this artifact's imports
     pub fn imports<'a>(&'a self) -> Box<Iterator<Item = (&'a str, &'a ImportKind)> + 'a> {
-        Box::new(self.imports.iter().map(move |&(id, ref kind)| (self.strings.resolve(id).unwrap(), kind)))
+        Box::new(
+            self.imports
+                .iter()
+                .map(move |&(id, ref kind)| (self.strings.resolve(id).unwrap(), kind)),
+        )
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
-        Box::new(self.definitions.iter().map(move |int_def| Definition::from((int_def, &self.strings))))
+        Box::new(
+            self.definitions
+                .iter()
+                .map(move |int_def| Definition::from((int_def, &self.strings))),
+        )
     }
     /// Get this artifacts relocations
     pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
-        Box::new(self.links.iter().map(move |&(ref from, ref to, ref at, ref reloc)| {
-            // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
-            // ensure it has a declaration
-            let (ref from_decl, ref to_decl) = (self.declarations.get(from).expect("declaration present"), self.declarations.get(to).unwrap());
-            let from = Binding { name: self.strings.resolve(*from).expect("from link"), decl: &from_decl.decl};
-            let to = Binding { name: self.strings.resolve(*to).expect("to link"), decl: &to_decl.decl};
-            LinkAndDecl {
-                from,
-                to,
-                at: *at,
-                reloc: *reloc,
-            }
-        }))
+        Box::new(
+            self.links
+                .iter()
+                .map(move |&(ref from, ref to, ref at, ref reloc)| {
+                    // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
+                    // ensure it has a declaration
+                    let (ref from_decl, ref to_decl) = (
+                        self.declarations.get(from).expect("declaration present"),
+                        self.declarations.get(to).unwrap(),
+                    );
+                    let from = Binding {
+                        name: self.strings.resolve(*from).expect("from link"),
+                        decl: &from_decl.decl,
+                    };
+                    let to = Binding {
+                        name: self.strings.resolve(*to).expect("to link"),
+                        decl: &to_decl.decl,
+                    };
+                    LinkAndDecl {
+                        from,
+                        to,
+                        at: *at,
+                        reloc: *reloc,
+                    }
+                }),
+        )
     }
     /// Declare and define a new symbolic reference with the given `decl` and given `definition`.
     /// This is sugar for `declare` and then `define`
-    pub fn declare_with<T: AsRef<str>>(&mut self, name: T, decl: Decl, definition: Vec<u8>) -> Result<(), Error> {
+    pub fn declare_with<T: AsRef<str>>(
+        &mut self,
+        name: T,
+        decl: Decl,
+        definition: Vec<u8>,
+    ) -> Result<(), Error> {
         self.declare(name.as_ref(), decl)?;
         self.define(name, definition)?;
         Ok(())
@@ -370,7 +429,10 @@ impl Artifact {
         let decl_name = self.strings.get_or_intern(name.as_ref());
         let previous_was_import;
         let new_idecl = {
-            let previous = self.declarations.entry(decl_name).or_insert(InternalDecl::new(decl.clone()));
+            let previous = self
+                .declarations
+                .entry(decl_name)
+                .or_insert(InternalDecl::new(decl.clone()));
             previous_was_import = previous.decl.is_import();
             previous.decl.absorb(decl)?;
             previous
@@ -398,13 +460,15 @@ impl Artifact {
                 // FIXME: do binary search or make imports an indexmap
                 for (i, &(ref name, _)) in self.imports.iter().enumerate() {
                     if *name == decl_name {
-                        index = Some (i);
+                        index = Some(i);
                     }
                 }
-                let _ = self.imports.swap_remove(index.expect("previous import was not in the imports array"));
+                let _ = self
+                    .imports
+                    .swap_remove(index.expect("previous import was not in the imports array"));
                 Ok(())
-            },
-            _ => Ok(())
+            }
+            _ => Ok(()),
         }
     }
     /// [Declare](struct.Artifact.html#method.declare) a sequence of name, [Decl](enum.Decl.html) pairs
@@ -425,14 +489,42 @@ impl Artifact {
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
-                    return Err(ArtifactError::DuplicateDefinition(name.as_ref().to_string()));
+                    return Err(ArtifactError::DuplicateDefinition(
+                        name.as_ref().to_string(),
+                    ));
                 }
                 let prop = match stype.decl {
-                    Decl::CString { global } => Prop { global, function: false, writable: false, cstring: true, section: false },
-                    Decl::Data { global, writable } => Prop { global, function: false, writable, cstring: false, section: false },
-                    Decl::Function { global } => Prop { global, function: true, writable: false, cstring: false, section: false },
-                    Decl::DebugSection { .. } => Prop { global: false, function: false, writable: false, cstring: false, section: true},
-                    _ if stype.decl.is_import() => return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into()),
+                    Decl::CString { global } => Prop {
+                        global,
+                        function: false,
+                        writable: false,
+                        cstring: true,
+                        section: false,
+                    },
+                    Decl::Data { global, writable } => Prop {
+                        global,
+                        function: false,
+                        writable,
+                        cstring: false,
+                        section: false,
+                    },
+                    Decl::Function { global } => Prop {
+                        global,
+                        function: true,
+                        writable: false,
+                        cstring: false,
+                        section: false,
+                    },
+                    Decl::DebugSection { .. } => Prop {
+                        global: false,
+                        function: false,
+                        writable: false,
+                        cstring: false,
+                        section: true,
+                    },
+                    _ if stype.decl.is_import() => {
+                        return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into());
+                    }
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
                 self.definitions.insert(InternalDefinition {
@@ -467,8 +559,14 @@ impl Artifact {
     /// A variant of `link` with a `Reloc` provided. Has all of the same invariants as
     /// `link`.
     pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: Reloc) -> Result<(), Error> {
-        let (link_from, link_to) = (self.strings.get_or_intern(link.from), self.strings.get_or_intern(link.to));
-        match (self.declarations.get(&link_from), self.declarations.get(&link_to)) {
+        let (link_from, link_to) = (
+            self.strings.get_or_intern(link.from),
+            self.strings.get_or_intern(link.to),
+        );
+        match (
+            self.declarations.get(&link_from),
+            self.declarations.get(&link_to),
+        ) {
             (Some(ref from_type), Some(_)) => {
                 if from_type.decl.is_import() {
                     return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
@@ -484,15 +582,20 @@ impl Artifact {
             }
         }
         Ok(())
-
     }
 
     /// Get set of non-import declarations that have not been defined. This must be an empty set in
     /// order to `emit` the artifact.
     pub fn undefined_symbols(&self) -> Vec<String> {
         let mut syms = Vec::new();
-        for (&name, _) in self.declarations.iter().filter(|&(_, &int)| !int.defined && !int.decl.is_import()) {
-            syms.push(String::from(self.strings.resolve(name).expect("declaration has a name")));
+        for (&name, _) in self
+            .declarations
+            .iter()
+            .filter(|&(_, &int)| !int.defined && !int.decl.is_import())
+        {
+            syms.push(String::from(
+                self.strings.resolve(name).expect("declaration has a name"),
+            ));
         }
         syms
     }

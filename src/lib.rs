@@ -1,6 +1,6 @@
 extern crate goblin;
-extern crate scroll;
 extern crate indexmap;
+extern crate scroll;
 extern crate string_interner;
 #[macro_use]
 extern crate log;
@@ -12,9 +12,9 @@ use goblin::container;
 
 type Ctx = container::Ctx;
 
-mod target;
 mod elf;
 mod mach;
+mod target;
 
 pub mod artifact;
-pub use crate::artifact::{Artifact, ArtifactBuilder, Link, ImportKind, Decl, Reloc};
+pub use crate::artifact::{Artifact, ArtifactBuilder, Decl, ImportKind, Link, Reloc};
