@@ -8,7 +8,10 @@ matrix:
     - rust: nightly
 env:
   - RUST_BACKTRACE=1 PATH="$HOME/.cargo/bin:$PATH"
+before_script:
+  - rustup component add rustfmt
 script:
+  - cargo fmt -- --check
   - cargo test
   - cargo run -- --deadbeef deadbeef.o
   - cargo run -- --link test test.o deadbeef.o
