@@ -19,6 +19,31 @@ pub enum Decl {
 }
 
 impl Decl {
+    /// An import of a function/routine defined in a shared library
+    pub fn function_import() -> FunctionImportDecl {
+        FunctionImportDecl::default()
+    }
+    /// A GOT-based import of data defined in a shared library
+    pub fn data_import() -> DataImportDecl {
+        DataImportDecl::default()
+    }
+    /// A function defined in this artifact
+    pub fn function() -> FunctionDecl {
+        FunctionDecl::default()
+    }
+    /// A data object defined in this artifact
+    pub fn data() -> DataDecl {
+        DataDecl::default()
+    }
+    /// A null-terminated string object defined in this artifact
+    pub fn cstring() -> CStringDecl {
+        CStringDecl::default()
+    }
+    /// A DWARF debug section defined in this artifact
+    pub fn debug_section() -> DebugSectionDecl {
+        DebugSectionDecl::default()
+    }
+
     /// If it is compatible, absorb the new declaration (`other`) into the old (`self`); otherwise returns an error.
     ///
     /// The rule here is "C-ish", but essentially:
@@ -125,5 +150,147 @@ impl Decl {
             Decl::DebugSection { .. } => true,
             _ => false,
         }
+    }
+}
+
+pub struct FunctionImportDecl {}
+
+impl Default for FunctionImportDecl {
+    fn default() -> Self {
+        FunctionImportDecl {}
+    }
+}
+
+impl Into<Decl> for FunctionImportDecl {
+    fn into(self) -> Decl {
+        Decl::FunctionImport
+    }
+}
+
+pub struct DataImportDecl {}
+
+impl Default for DataImportDecl {
+    fn default() -> Self {
+        DataImportDecl {}
+    }
+}
+
+impl Into<Decl> for DataImportDecl {
+    fn into(self) -> Decl {
+        Decl::DataImport
+    }
+}
+
+pub struct FunctionDecl {
+    global: bool,
+}
+
+impl Default for FunctionDecl {
+    fn default() -> Self {
+        FunctionDecl { global: false }
+    }
+}
+
+impl FunctionDecl {
+    pub fn global(mut self) -> Self {
+        self.global = true;
+        self
+    }
+    pub fn local(mut self) -> Self {
+        self.global = false;
+        self
+    }
+}
+
+impl Into<Decl> for FunctionDecl {
+    fn into(self) -> Decl {
+        Decl::Function {
+            global: self.global,
+        }
+    }
+}
+
+pub struct DataDecl {
+    global: bool,
+    writable: bool,
+}
+
+impl Default for DataDecl {
+    fn default() -> Self {
+        DataDecl {
+            global: false,
+            writable: false,
+        }
+    }
+}
+
+impl DataDecl {
+    pub fn global(mut self) -> Self {
+        self.global = true;
+        self
+    }
+    pub fn local(mut self) -> Self {
+        self.global = false;
+        self
+    }
+    pub fn writable(mut self) -> Self {
+        self.writable = true;
+        self
+    }
+    pub fn read_only(mut self) -> Self {
+        self.writable = false;
+        self
+    }
+}
+
+impl Into<Decl> for DataDecl {
+    fn into(self) -> Decl {
+        Decl::Data {
+            global: self.global,
+            writable: self.writable,
+        }
+    }
+}
+
+pub struct CStringDecl {
+    global: bool,
+}
+
+impl Default for CStringDecl {
+    fn default() -> Self {
+        CStringDecl { global: false }
+    }
+}
+
+impl CStringDecl {
+    pub fn global(mut self) -> Self {
+        self.global = true;
+        self
+    }
+    pub fn local(mut self) -> Self {
+        self.global = false;
+        self
+    }
+}
+
+impl Into<Decl> for CStringDecl {
+    fn into(self) -> Decl {
+        Decl::CString {
+            global: self.global,
+        }
+    }
+}
+
+pub struct DebugSectionDecl {}
+
+impl Default for DebugSectionDecl {
+    fn default() -> Self {
+        DebugSectionDecl {}
+    }
+}
+
+impl Into<Decl> for DebugSectionDecl {
+    fn into(self) -> Decl {
+        Decl::DebugSection
     }
 }
