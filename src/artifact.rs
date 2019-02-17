@@ -9,8 +9,7 @@ use std::io::Write;
 use std::fs::File;
 use std::collections::BTreeSet;
 
-use elf;
-use mach;
+use crate::{elf, mach};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -159,7 +158,7 @@ impl Decl {
     }
     /// Is this an import (function or data) from a shared library?
     pub fn is_import(&self) -> bool {
-        use Decl::*;
+        use crate::Decl::*;
         match *self {
             FunctionImport => true,
             DataImport => true,

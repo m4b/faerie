@@ -2,7 +2,6 @@ extern crate faerie;
 extern crate goblin;
 extern crate env_logger;
 extern crate structopt;
-#[macro_use]
 extern crate structopt_derive;
 extern crate failure;
 extern crate target_lexicon;
@@ -367,7 +366,7 @@ fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
 
 fn main () {
     let args = Args::from_args();
-    if args.debug { ::env::set_var("RUST_LOG", "faerie=debug"); };
+    if args.debug { env::set_var("RUST_LOG", "faerie=debug"); };
     env_logger::init();
     let res = if args.deadbeef { deadbeef(args) } else { run(args) };
     match res {
