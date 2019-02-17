@@ -1,19 +1,19 @@
-extern crate faerie;
-extern crate goblin;
 extern crate env_logger;
+extern crate faerie;
+extern crate failure;
+extern crate goblin;
 extern crate structopt;
 extern crate structopt_derive;
-extern crate failure;
 extern crate target_lexicon;
 
-use structopt::StructOpt;
 use failure::Error;
-use target_lexicon::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
+use structopt::StructOpt;
+use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor};
 
-use faerie::{Link, ArtifactBuilder, Decl, Reloc};
-use std::path::Path;
-use std::fs::File;
+use faerie::{ArtifactBuilder, Decl, Link, Reloc};
 use std::env;
+use std::fs::File;
+use std::path::Path;
 use std::process::Command;
 
 // ELF linking
@@ -26,10 +26,16 @@ use std::process::Command;
 // ./prototype --deadbeef deadbeef.o
 // ./prototype --link test test.o deadbeef.o
 #[derive(StructOpt, Debug, Clone)]
-#[structopt(name = "prototype", about = "This is prototype binary for emitting object files;
- it is only meant for debugging, a reference, etc. - Knock yourself out")]
+#[structopt(
+    name = "prototype",
+    about = "This is prototype binary for emitting object files;
+ it is only meant for debugging, a reference, etc. - Knock yourself out"
+)]
 pub struct Args {
-    #[structopt(long = "deadbeef", help = "Generate deadbeef object file to link against main program")]
+    #[structopt(
+        long = "deadbeef",
+        help = "Generate deadbeef object file to link against main program"
+    )]
     deadbeef: bool,
 
     #[structopt(short = "l", long = "link", help = "Link the file with this name")]
@@ -51,10 +57,10 @@ pub struct Args {
     filename: String,
 
     #[structopt(help = "Additional files to link")]
-    linkline: Vec<String>
+    linkline: Vec<String>,
 }
 
-fn run (args: Args) -> Result<(), Error> {
+fn run(args: Args) -> Result<(), Error> {
     let file = File::create(Path::new(&args.filename))?;
     let target = Triple {
         architecture: Architecture::X86_64,
@@ -75,13 +81,25 @@ fn run (args: Args) -> Result<(), Error> {
     // first we declare our symbolic references;
     // it is a runtime error to define a symbol _without_ declaring it first
     let declarations = vec![
-        ("deadbeef",   Decl::Function { global: false }),
-        ("main",       Decl::Function { global: true }),
-        ("str.1",      Decl::CString { global: false }),
-        ("DEADBEEF",   Decl::DataImport),
-        ("STATIC",     Decl::Data { global: true, writable: true }),
-        ("STATIC_REF", Decl::Data { global: true, writable: true }),
-        ("printf",     Decl::FunctionImport),
+        ("deadbeef", Decl::Function { global: false }),
+        ("main", Decl::Function { global: true }),
+        ("str.1", Decl::CString { global: false }),
+        ("DEADBEEF", Decl::DataImport),
+        (
+            "STATIC",
+            Decl::Data {
+                global: true,
+                writable: true,
+            },
+        ),
+        (
+            "STATIC_REF",
+            Decl::Data {
+                global: true,
+                writable: true,
+            },
+        ),
+        ("printf", Decl::FunctionImport),
     ];
     obj.declarations(declarations.into_iter())?;
 
@@ -96,15 +114,13 @@ fn run (args: Args) -> Result<(), Error> {
     //   10:	89 c8                	mov    %ecx,%eax
     //   12:	5d                   	pop    %rbp
     //   13:	c3                   	retq
-    obj.define("deadbeef",
-        vec![0x55,
-             0x48, 0x89, 0xe5,
-             0x48, 0x8b, 0x05, 0x00, 0x00, 0x00, 0x00,
-             0x8b, 0x08,
-             0x83, 0xc1, 0x01,
-             0x89, 0xc8,
-             0x5d,
-             0xc3])?;
+    obj.define(
+        "deadbeef",
+        vec![
+            0x55, 0x48, 0x89, 0xe5, 0x48, 0x8b, 0x05, 0x00, 0x00, 0x00, 0x00, 0x8b, 0x08, 0x83,
+            0xc1, 0x01, 0x89, 0xc8, 0x5d, 0xc3,
+        ],
+    )?;
 
     // main:
     // 55	push   %rbp
@@ -125,47 +141,60 @@ fn run (args: Args) -> Result<(), Error> {
     // 48 83 c4 10	add    $0x10,%rsp
     // 5d	pop    %rbp
     // c3	retq
-    obj.define("main",
+    obj.define(
+        "main",
         vec![
-             0x55,
-             0x48, 0x89, 0xe5,
-             0x48, 0x83, 0xec, 0x10,
-             0xc7, 0x45, 0xfc, 0x00, 0x00, 0x00, 0x00,
-             0xb8, 0x00, 0x00, 0x00, 0x00,
-             0xe8, 0x00, 0x00, 0x00, 0x00,
-             0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,
-             0x48, 0x8b, 0x0d, 0x00, 0x00, 0x00, 0x00,
-             0x8b, 0x11,
-             0x89, 0xc6,
-             0xb0, 0x00,
-             0xe8, 0x00, 0x00, 0x00, 0x00,
-             0x31, 0xd2,
-             0x89, 0x45, 0xf8,
-             0x89, 0xd0,
-             0x48, 0x83, 0xc4, 0x10,
-             0x5d,
-             0xc3,
-        ])?;
+            0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x10, 0xc7, 0x45, 0xfc, 0x00, 0x00, 0x00,
+            0x00, 0xb8, 0x00, 0x00, 0x00, 0x00, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8d, 0x3d,
+            0x00, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x8b, 0x11, 0x89,
+            0xc6, 0xb0, 0x00, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x31, 0xd2, 0x89, 0x45, 0xf8, 0x89,
+            0xd0, 0x48, 0x83, 0xc4, 0x10, 0x5d, 0xc3,
+        ],
+    )?;
     // define static data
     obj.define("str.1", b"deadbeef: 0x%x - 0x%x\n\0".to_vec())?;
-    obj.define("STATIC",     [0xbe, 0xba, 0xfe, 0xca].to_vec())?;
+    obj.define("STATIC", [0xbe, 0xba, 0xfe, 0xca].to_vec())?;
     // .data static references need to be zero'd out explicitly for now.
     obj.define("STATIC_REF", vec![0; 8])?;
 
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
     // -- main relocations --
-    obj.link(Link { from: "main", to: "deadbeef", at: 0x15 })?;
-    obj.link(Link { from: "main", to: "str.1", at: 0x1c })?;
-    obj.link(Link { from: "main", to: "STATIC_REF", at: 0x23 })?;
-    obj.link(Link { from: "main", to: "printf", at: 0x2e })?;
+    obj.link(Link {
+        from: "main",
+        to: "deadbeef",
+        at: 0x15,
+    })?;
+    obj.link(Link {
+        from: "main",
+        to: "str.1",
+        at: 0x1c,
+    })?;
+    obj.link(Link {
+        from: "main",
+        to: "STATIC_REF",
+        at: 0x23,
+    })?;
+    obj.link(Link {
+        from: "main",
+        to: "printf",
+        at: 0x2e,
+    })?;
 
     // -- deadbeef relocations --
-    obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 0x7 })?;
+    obj.link(Link {
+        from: "deadbeef",
+        to: "DEADBEEF",
+        at: 0x7,
+    })?;
 
     // -- static data relocations --
     // this is a reference to an object in the data section, so we are always at relative offset 0
-    obj.link(Link { from: "STATIC_REF", to: "STATIC", at: 0 })?;
+    obj.link(Link {
+        from: "STATIC_REF",
+        to: "STATIC",
+        at: 0,
+    })?;
 
     // Finally, we emit the object file
     obj.write(file)?;
@@ -175,7 +204,7 @@ fn run (args: Args) -> Result<(), Error> {
     Ok(())
 }
 
-fn deadbeef (args: Args) -> Result<(), Error> {
+fn deadbeef(args: Args) -> Result<(), Error> {
     let file = File::create(Path::new(&args.filename))?;
     let target = Triple {
         architecture: Architecture::X86_64,
@@ -196,7 +225,13 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
     // gold complains though:
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
-    obj.declare("DEADBEEF", Decl::Data { global: true, writable: false })?;
+    obj.declare(
+        "DEADBEEF",
+        Decl::Data {
+            global: true,
+            writable: false,
+        },
+    )?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
 
     if args.dwarf {
@@ -205,7 +240,8 @@ fn deadbeef (args: Args) -> Result<(), Error> {
         obj.declare(".debug_info", Decl::DebugSection)?;
         obj.declare(".debug_str", Decl::DebugSection)?;
 
-        obj.define(".debug_str",
+        obj.define(
+            ".debug_str",
             concat![
                 // 0x00:
                 "faerie\0",
@@ -215,93 +251,58 @@ fn deadbeef (args: Args) -> Result<(), Error> {
                 "deadbeef.c\0",
                 // 0x24:
                 "DEADBEEF\0",
-            ].as_bytes().to_vec())?;
-        obj.define(".debug_abbrev",
+            ]
+            .as_bytes()
+            .to_vec(),
+        )?;
+        obj.define(
+            ".debug_abbrev",
             vec![
                 // Abbrev 1: DW_TAG_compile_unit, DW_CHILDREN_yes
-                0x01, 0x11, 0x01,
-                // DW_AT_producer, DW_FORM_strp
-                0x25, 0x0e,
-                // DW_AT_language, DW_FORM_data1
-                0x13, 0x0b,
-                // DW_AT_name, DW_FORM_strp
-                0x03, 0x0e,
-                // DW_AT_comp_dir, DW_FORM_strp
-                0x1b, 0x0e,
-                // null
-                0x00, 0x00,
-
-                // Abbrev 2: DW_TAG_variable, DW_CHILDREN_no
-                0x02, 0x34, 0x00,
-                // DW_AT_name, DW_FORM_strp
-                0x03, 0x0e,
-                // DW_AT_type, DW_FORM_ref4
-                0x49, 0x13,
-                // DW_AT_external, DW_FORM_flag_present
-                0x3f, 0x19,
-                // DW_AT_location, DW_FORM_exprloc
-                0x02, 0x18,
-                // null
-                0x00, 0x00,
-
-                // Abbrev 3: DW_TAG_base_type, DW_CHILDREN_no
-                0x03, 0x24, 0x00,
-                // DW_AT_name, DW_FORM_string
-                0x03, 0x08,
-                // DW_AT_byte_size, DW_FORM_data1
-                0x0b, 0x0b,
-                // DW_AT_encoding, DW_FORM_data1
-                0x3e, 0x0b,
-                // null
-                0x00, 0x00,
-
-                // null
+                0x01, 0x11, 0x01, // DW_AT_producer, DW_FORM_strp
+                0x25, 0x0e, // DW_AT_language, DW_FORM_data1
+                0x13, 0x0b, // DW_AT_name, DW_FORM_strp
+                0x03, 0x0e, // DW_AT_comp_dir, DW_FORM_strp
+                0x1b, 0x0e, // null
+                0x00, 0x00, // Abbrev 2: DW_TAG_variable, DW_CHILDREN_no
+                0x02, 0x34, 0x00, // DW_AT_name, DW_FORM_strp
+                0x03, 0x0e, // DW_AT_type, DW_FORM_ref4
+                0x49, 0x13, // DW_AT_external, DW_FORM_flag_present
+                0x3f, 0x19, // DW_AT_location, DW_FORM_exprloc
+                0x02, 0x18, // null
+                0x00, 0x00, // Abbrev 3: DW_TAG_base_type, DW_CHILDREN_no
+                0x03, 0x24, 0x00, // DW_AT_name, DW_FORM_string
+                0x03, 0x08, // DW_AT_byte_size, DW_FORM_data1
+                0x0b, 0x0b, // DW_AT_encoding, DW_FORM_data1
+                0x3e, 0x0b, // null
+                0x00, 0x00, // null
                 0x00,
-            ])?;
-        let mut debug_info =
-            vec![
-                // 0x00: Length = 0x34 - 4
-                0x30, 0x00, 0x00, 0x00,
-                // 0x04: Version
-                0x04, 0x00,
-                // 0x06: Abbrev offset (needs reloc)
-                0x00, 0x00, 0x00, 0x00,
-                // 0x0a: Address size
-                0x08,
-
-                // 0x0b: Abbrev 1 = DW_TAG_compile_unit
-                0x01,
-                // 0x0c: DW_AT_producer = 0x00 (needs reloc)
-                0x00, 0x00, 0x00, 0x00,
-                // 0x10: DW_AT_language = DW_LANG_C
-                0x02,
-                // 0x11: DW_AT_name = 0x19 (needs reloc)
-                0x00, 0x00, 0x00, 0x00,
-                // 0x15: DW_AT_comp_dir = 0x07 (needs reloc)
-                0x00, 0x00, 0x00, 0x00,
-
-                // 0x19: Abbrev 2 = DW_TAG_variable
-                0x02,
-                // 0x1a: DW_AT_name = 0x24 (needs reloc)
-                0x00, 0x00, 0x00, 0x00,
-                // 0x1e: DW_AT_type = offset of int base_type
-                0x2c, 0x00, 0x00, 0x00,
-                // 0x22: DW_FORM_flag_present = no data needed
-                // 0x22: DW_AT_location = len 9, DW_OP_addr DEADBEEF (needs reloc)
-                0x09, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
-                // 0x2c: Abbrev 3 = DW_TAG_base_type
-                0x03,
-                // 0x2d: DW_AT_name = "int"
-                b'i', b'n', b't', 0x00,
-                // 0x31: DW_AT_byte_size = 4
-                0x04,
-                // 0x32: DW_AT_encoding = DW_ATE_signed
-                0x05,
-
-                // 0x33: End of children
-                0x00,
-            ];
+            ],
+        )?;
+        let mut debug_info = vec![
+            // 0x00: Length = 0x34 - 4
+            0x30, 0x00, 0x00, 0x00, // 0x04: Version
+            0x04, 0x00, // 0x06: Abbrev offset (needs reloc)
+            0x00, 0x00, 0x00, 0x00, // 0x0a: Address size
+            0x08, // 0x0b: Abbrev 1 = DW_TAG_compile_unit
+            0x01, // 0x0c: DW_AT_producer = 0x00 (needs reloc)
+            0x00, 0x00, 0x00, 0x00, // 0x10: DW_AT_language = DW_LANG_C
+            0x02, // 0x11: DW_AT_name = 0x19 (needs reloc)
+            0x00, 0x00, 0x00, 0x00, // 0x15: DW_AT_comp_dir = 0x07 (needs reloc)
+            0x00, 0x00, 0x00, 0x00, // 0x19: Abbrev 2 = DW_TAG_variable
+            0x02, // 0x1a: DW_AT_name = 0x24 (needs reloc)
+            0x00, 0x00, 0x00, 0x00, // 0x1e: DW_AT_type = offset of int base_type
+            0x2c, 0x00, 0x00, 0x00,
+            // 0x22: DW_FORM_flag_present = no data needed
+            // 0x22: DW_AT_location = len 9, DW_OP_addr DEADBEEF (needs reloc)
+            0x09, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // 0x2c: Abbrev 3 = DW_TAG_base_type
+            0x03, // 0x2d: DW_AT_name = "int"
+            b'i', b'n', b't', 0x00, // 0x31: DW_AT_byte_size = 4
+            0x04, // 0x32: DW_AT_encoding = DW_ATE_signed
+            0x05, // 0x33: End of children
+            0x00,
+        ];
 
         if args.mach {
             // No relocation needed for Mach.
@@ -311,34 +312,76 @@ fn deadbeef (args: Args) -> Result<(), Error> {
         } else {
             // abbrev offset
             obj.link_with(
-                Link { from: ".debug_info", to: ".debug_abbrev", at: 0x06},
-                Reloc::Debug { size: 4, addend: 0x0},
+                Link {
+                    from: ".debug_info",
+                    to: ".debug_abbrev",
+                    at: 0x06,
+                },
+                Reloc::Debug {
+                    size: 4,
+                    addend: 0x0,
+                },
             )?;
             // producer
             obj.link_with(
-                Link { from: ".debug_info", to: ".debug_str", at: 0x0c},
-                Reloc::Debug { size: 4, addend: 0x0},
+                Link {
+                    from: ".debug_info",
+                    to: ".debug_str",
+                    at: 0x0c,
+                },
+                Reloc::Debug {
+                    size: 4,
+                    addend: 0x0,
+                },
             )?;
             // CU name
             obj.link_with(
-                Link { from: ".debug_info", to: ".debug_str", at: 0x11},
-                Reloc::Debug { size: 4, addend: 0x19},
+                Link {
+                    from: ".debug_info",
+                    to: ".debug_str",
+                    at: 0x11,
+                },
+                Reloc::Debug {
+                    size: 4,
+                    addend: 0x19,
+                },
             )?;
             // comp dir
             obj.link_with(
-                Link { from: ".debug_info", to: ".debug_str", at: 0x15},
-                Reloc::Debug { size: 4, addend: 0x7},
+                Link {
+                    from: ".debug_info",
+                    to: ".debug_str",
+                    at: 0x15,
+                },
+                Reloc::Debug {
+                    size: 4,
+                    addend: 0x7,
+                },
             )?;
             // var name
             obj.link_with(
-                Link { from: ".debug_info", to: ".debug_str", at: 0x1a},
-                Reloc::Debug { size: 4, addend: 0x24},
+                Link {
+                    from: ".debug_info",
+                    to: ".debug_str",
+                    at: 0x1a,
+                },
+                Reloc::Debug {
+                    size: 4,
+                    addend: 0x24,
+                },
             )?;
         }
         // var location
         obj.link_with(
-            Link { from: ".debug_info", to: "DEADBEEF", at: 0x24},
-            Reloc::Debug { size: 8, addend: 0x0},
+            Link {
+                from: ".debug_info",
+                to: "DEADBEEF",
+                at: 0x24,
+            },
+            Reloc::Debug {
+                size: 8,
+                addend: 0x0,
+            },
         )?;
 
         obj.define(".debug_info", debug_info)?;
@@ -354,23 +397,30 @@ fn deadbeef (args: Args) -> Result<(), Error> {
 fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
     //ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
     let child = Command::new("cc")
-                        .args(linkline)
-                        .args(&[name,
-                                "-o", output,
-                            ])
-                        .spawn()?;
+        .args(linkline)
+        .args(&[name, "-o", output])
+        .spawn()?;
     let child = child.wait_with_output()?;
-    println!("{}", ::std::str::from_utf8(child.stdout.as_slice()).unwrap());
+    println!(
+        "{}",
+        ::std::str::from_utf8(child.stdout.as_slice()).unwrap()
+    );
     Ok(())
 }
 
-fn main () {
+fn main() {
     let args = Args::from_args();
-    if args.debug { env::set_var("RUST_LOG", "faerie=debug"); };
+    if args.debug {
+        env::set_var("RUST_LOG", "faerie=debug");
+    };
     env_logger::init();
-    let res = if args.deadbeef { deadbeef(args) } else { run(args) };
+    let res = if args.deadbeef {
+        deadbeef(args)
+    } else {
+        run(args)
+    };
     match res {
         Ok(()) => (),
-        Err(err) => println!("{:#}", err)
+        Err(err) => println!("{:#}", err),
     }
 }

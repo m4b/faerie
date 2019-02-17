@@ -5,22 +5,26 @@
 // respectively; remove this once used again
 #![allow(dead_code)]
 
-use goblin;
+use crate::{
+    artifact::{self, LinkAndDecl, Reloc},
+    target::make_ctx,
+    Artifact, Ctx, Decl, ImportKind,
+};
 use failure::Error;
-use crate::{artifact::{self, LinkAndDecl, Reloc}, Artifact, Decl, Ctx, ImportKind, target::make_ctx};
+use goblin;
 
-use std::collections::{HashMap, hash_map};
-use std::fmt;
-use std::io::{Seek, Cursor, BufWriter, Write};
-use std::io::SeekFrom::*;
-use scroll::IOwrite;
-use string_interner::DefaultStringInterner;
 use indexmap::IndexMap;
+use scroll::IOwrite;
+use std::collections::{hash_map, HashMap};
+use std::fmt;
+use std::io::SeekFrom::*;
+use std::io::{BufWriter, Cursor, Seek, Write};
+use string_interner::DefaultStringInterner;
 use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
-use goblin::elf::section_header::{self, SectionHeader};
 use goblin::elf::reloc;
+use goblin::elf::section_header::{self, SectionHeader};
 
 // interned string idx
 type StringIndex = usize;
@@ -34,35 +38,20 @@ struct MachineTag(u16);
 
 impl From<Architecture> for MachineTag {
     fn from(architecture: Architecture) -> MachineTag {
-        use target_lexicon::Architecture::*;
         use goblin::elf::header::*;
+        use target_lexicon::Architecture::*;
         MachineTag(match architecture {
             X86_64 => EM_X86_64,
-            I386 |
-            I586 |
-            I686 => EM_386,
+            I386 | I586 | I686 => EM_386,
             Aarch64 => EM_AARCH64,
-            Arm |
-            Armv4t |
-            Armv5te |
-            Armv7 |
-            Armv7s |
-            Thumbv6m |
-            Thumbv7em |
-            Thumbv7m => EM_ARM,
-            Mips |
-            Mipsel |
-            Mips64 |
-            Mips64el => EM_MIPS,
+            Arm | Armv4t | Armv5te | Armv7 | Armv7s | Thumbv6m | Thumbv7em | Thumbv7m => EM_ARM,
+            Mips | Mipsel | Mips64 | Mips64el => EM_MIPS,
             Powerpc => EM_PPC,
-            Powerpc64 |
-            Powerpc64le => EM_PPC64,
-            Riscv32 |
-            Riscv64 => EM_RISCV,
+            Powerpc64 | Powerpc64le => EM_PPC64,
+            Riscv32 | Riscv64 => EM_RISCV,
             S390x => EM_S390,
             Sparc => EM_SPARC,
-            Sparc64 |
-            Sparcv9 => EM_SPARCV9,
+            Sparc64 | Sparcv9 => EM_SPARCV9,
             Msp430 => EM_MSP430,
             Unknown => EM_NONE,
             Asmjs => panic!("asm.js does not exist in ELF"),
@@ -107,46 +96,49 @@ impl SymbolBuilder {
     }
     /// Set the size of this symbol; for functions, it should be the routines size in bytes
     pub fn size(mut self, size: usize) -> Self {
-        self.size = size as u64; self
+        self.size = size as u64;
+        self
     }
     /// Is this symbol local in scope?
     pub fn local(mut self, local: bool) -> Self {
-        self.global = !local; self
+        self.global = !local;
+        self
     }
     /// Set the symbol name as a byte offset into the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
-        self.name_offset = name_offset; self
+        self.name_offset = name_offset;
+        self
     }
     /// Finalize and create the symbol
     pub fn create(self) -> Symbol {
-        use goblin::elf::sym::{STT_NOTYPE, STT_FILE, STT_FUNC, STT_SECTION, STT_OBJECT, STB_LOCAL, STB_GLOBAL};
         use goblin::elf::section_header::SHN_ABS;
+        use goblin::elf::sym::{
+            STB_GLOBAL, STB_LOCAL, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT, STT_SECTION,
+        };
         let mut st_shndx = 0;
         let mut st_info = 0;
         let st_value = 0;
         match self.typ {
             SymbolType::Function => {
                 st_info |= STT_FUNC;
-            },
+            }
             SymbolType::Object => {
                 st_info |= STT_OBJECT;
-            },
+            }
             SymbolType::Import => {
                 st_info = STT_NOTYPE;
                 st_info |= STB_GLOBAL << 4;
-            },
+            }
             SymbolType::Section => {
                 st_info |= STT_SECTION;
                 st_info |= STB_LOCAL << 4;
-            },
+            }
             SymbolType::File => {
                 st_info = STT_FILE;
                 // knowledge™
                 st_shndx = SHN_ABS as usize;
-            },
-            SymbolType::None => {
-                st_info = STT_NOTYPE
-            },
+            }
+            SymbolType::None => st_info = STT_NOTYPE,
         }
         if self.global {
             st_info |= STB_GLOBAL << 4;
@@ -161,7 +153,6 @@ impl SymbolBuilder {
             st_shndx,
             st_value,
         }
-
     }
 }
 
@@ -200,24 +191,29 @@ impl SectionBuilder {
     }
     /// Make this section executable
     pub fn exec(mut self) -> Self {
-        self.exec = true; self
+        self.exec = true;
+        self
     }
     /// Make this section allocatable
     pub fn alloc(mut self) -> Self {
-        self.alloc = true; self
+        self.alloc = true;
+        self
     }
     /// Make this section writable
-    pub fn writable(mut self, writable:bool) -> Self {
-        self.write = writable; self
+    pub fn writable(mut self, writable: bool) -> Self {
+        self.write = writable;
+        self
     }
 
     /// Set the byte offset of this section's name in the corresponding strtab
     pub fn name_offset(mut self, name_offset: usize) -> Self {
-        self.name_offset = name_offset; self
+        self.name_offset = name_offset;
+        self
     }
     /// Set the type of this section
     fn section_type(mut self, typ: SectionType) -> Self {
-        self.typ = typ; self
+        self.typ = typ;
+        self
     }
     /// Finalize and create the actual section
     pub fn create(self, ctx: &Ctx) -> Section {
@@ -237,34 +233,52 @@ impl SectionBuilder {
         }
         match self.typ {
             SectionType::Bits => {
-                shdr.sh_addralign = if self.exec { 0x10 } else if self.write { 0x8 } else { 1 };
+                shdr.sh_addralign = if self.exec {
+                    0x10
+                } else if self.write {
+                    0x8
+                } else {
+                    1
+                };
                 shdr.sh_type = SHT_PROGBITS
-            },
+            }
             SectionType::String => {
-                shdr.sh_addralign = if self.exec { 0x10 } else if self.write { 0x8 } else { 1 };
+                shdr.sh_addralign = if self.exec {
+                    0x10
+                } else if self.write {
+                    0x8
+                } else {
+                    1
+                };
                 shdr.sh_type = SHT_PROGBITS;
                 shdr.sh_flags |= (SHF_MERGE | SHF_STRINGS) as u64;
-            },
+            }
             SectionType::Data => {
-                shdr.sh_addralign = if self.exec { 0x10 } else if self.write { 0x8 } else { 1 };
+                shdr.sh_addralign = if self.exec {
+                    0x10
+                } else if self.write {
+                    0x8
+                } else {
+                    1
+                };
                 shdr.sh_type = SHT_PROGBITS;
             }
             SectionType::StrTab => {
                 shdr.sh_addralign = 0x1;
                 shdr.sh_type = SHT_STRTAB;
-            },
+            }
             SectionType::SymTab => {
                 shdr.sh_entsize = Symbol::size(ctx.container) as u64;
                 shdr.sh_addralign = 0x8;
                 shdr.sh_type = SHT_SYMTAB;
-            },
+            }
             SectionType::Relocation => {
                 // FIXME: hardcodes to use rela
                 shdr.sh_entsize = Relocation::size(true, *ctx) as u64;
                 shdr.sh_addralign = 0x8;
                 shdr.sh_flags = 0;
                 shdr.sh_type = SHT_RELA
-            },
+            }
             SectionType::None => shdr.sh_type = SHT_NULL,
         }
         shdr
@@ -299,19 +313,23 @@ impl RelocationBuilder {
     }
     /// Set this relocation to a relocation without an addend
     pub fn rel(mut self) -> Self {
-        self.addend = None; self
+        self.addend = None;
+        self
     }
     /// Set this relocation to a relocation with an addend of `addend`.
     pub fn addend(mut self, addend: i64) -> Self {
-        self.addend = Some(addend); self
+        self.addend = Some(addend);
+        self
     }
     /// Set the section relative offset this relocation refers to
     pub fn offset(mut self, offset: u64) -> Self {
-        self.offset = offset; self
+        self.offset = offset;
+        self
     }
     /// Set the symbol index this relocation affects
     pub fn sym(mut self, sym_idx: usize) -> Self {
-        self.sym_idx = sym_idx; self
+        self.sym_idx = sym_idx;
+        self
     }
     /// Finalize and actually create this relocation
     pub fn create(self) -> Relocation {
@@ -348,15 +366,15 @@ impl<'a> fmt::Debug for Elf<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         writeln!(fmt, "{}", self.name)?;
         writeln!(fmt, "{:?}", self.code)?;
-        writeln!(fmt, "{:#?}", self.        relocations)?;
-        writeln!(fmt, "{:?}", self.        imports)?;
-        writeln!(fmt, "{:?}", self.        sections)?;
-        writeln!(fmt, "{:?}", self.        offsets)?;
-        writeln!(fmt, "SizeofStrtab: {:?}", self.        sizeof_strtab)?;
-        writeln!(fmt, "SizeofBits: {:?}", self.        sizeof_bits)?;
+        writeln!(fmt, "{:#?}", self.relocations)?;
+        writeln!(fmt, "{:?}", self.imports)?;
+        writeln!(fmt, "{:?}", self.sections)?;
+        writeln!(fmt, "{:?}", self.offsets)?;
+        writeln!(fmt, "SizeofStrtab: {:?}", self.sizeof_strtab)?;
+        writeln!(fmt, "SizeofBits: {:?}", self.sizeof_bits)?;
         //writeln!(fmt, "SymtabOffset: {:?}", self.        symtab_offset)?;
-        writeln!(fmt, "Strings: {:?}", self.        strings.len())?;
-        writeln!(fmt, "{:?}", self.        ctx)
+        writeln!(fmt, "Strings: {:?}", self.strings.len())?;
+        writeln!(fmt, "{:?}", self.ctx)
     }
 }
 
@@ -387,20 +405,23 @@ impl<'a> Elf<'a> {
             let offset = push_strtab(&artifact.name);
             // ELF requires a null symbol as the first symbol.
             special_symbols.push(Symbol::default());
-            special_symbols.push(SymbolBuilder::new(SymbolType::File).name_offset(offset).create());
-
+            special_symbols.push(
+                SymbolBuilder::new(SymbolType::File)
+                    .name_offset(offset)
+                    .create(),
+            );
         }
 
         let sizeof_bits = Header::size(&ctx);
         Elf {
             name: &artifact.name,
-            code:        IndexMap::new(),
+            code: IndexMap::new(),
             relocations: IndexMap::new(),
-            imports:     HashMap::new(),
-            symbols:     IndexMap::new(),
+            imports: HashMap::new(),
+            symbols: IndexMap::new(),
             special_symbols,
-            sections:    IndexMap::new(),
-            nsections:   4,
+            sections: IndexMap::new(),
+            nsections: 4,
             offsets,
             strings,
             sizeof_strtab,
@@ -414,9 +435,7 @@ impl<'a> Elf<'a> {
         let size = name.len() + 1;
         let idx = self.strings.get_or_intern(name);
         match self.offsets.entry(idx) {
-            hash_map::Entry::Occupied(entry) => {
-                (idx, *entry.get())
-            }
+            hash_map::Entry::Occupied(entry) => (idx, *entry.get()),
             hash_map::Entry::Vacant(entry) => {
                 let offset = self.sizeof_strtab;
                 self.sizeof_strtab += size;
@@ -426,13 +445,16 @@ impl<'a> Elf<'a> {
     }
     pub fn add_definition(&mut self, name: &str, data: &'a [u8], prop: &artifact::Prop) {
         // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
-        if !prop.global { self.nlocals += 1; }
+        if !prop.global {
+            self.nlocals += 1;
+        }
         // FIXME: this is kind of hacky?
-        let segment_name =
-          if prop.function { "text" } else {
-              // we'd add ro here once the prop supports that
-              "data"
-          };
+        let segment_name = if prop.function {
+            "text"
+        } else {
+            // we'd add ro here once the prop supports that
+            "data"
+        };
         let section_name = format!(".{}.{}", segment_name, name);
         // store the size of this code
         let size = data.len();
@@ -440,33 +462,44 @@ impl<'a> Elf<'a> {
         // now we build the section a la LLVM "function sections"
         // FIXME: probably add padding alignment
         let section = {
-            let stype =
-                if prop.function {
-                    SectionType::Bits
-                } else if prop.cstring {
-                    SectionType::String
-                } else {
-                    SectionType::Data
-                };
+            let stype = if prop.function {
+                SectionType::Bits
+            } else if prop.cstring {
+                SectionType::String
+            } else {
+                SectionType::Data
+            };
 
             let tmp = SectionBuilder::new(size as u64)
                 .section_type(stype)
-                .alloc().writable(prop.writable);
+                .alloc()
+                .writable(prop.writable);
 
             // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
-            if prop.function { tmp.exec() } else { tmp }
+            if prop.function {
+                tmp.exec()
+            } else {
+                tmp
+            }
         };
         let shndx = self.add_progbits(section_name, section, data);
 
         // can do prefix optimization here actually, because .text.*
         let (idx, offset) = self.new_string(name.to_string());
-        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        debug!(
+            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+            idx, offset, self.sizeof_strtab
+        );
         // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if prop.function { SymbolType::Function } else { SymbolType::Object })
-            .size(size)
-            .name_offset(offset)
-            .local(!prop.global)
-            .create();
+        let mut symbol = SymbolBuilder::new(if prop.function {
+            SymbolType::Function
+        } else {
+            SymbolType::Object
+        })
+        .size(size)
+        .name_offset(offset)
+        .local(!prop.global)
+        .create();
         symbol.st_shndx = shndx;
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
@@ -477,14 +510,16 @@ impl<'a> Elf<'a> {
         } else {
             SectionType::Bits
         };
-        let section = SectionBuilder::new(data.len() as u64)
-            .section_type(stype);
+        let section = SectionBuilder::new(data.len() as u64).section_type(stype);
         self.add_progbits(name.to_string(), section, data);
     }
     /// Create a progbits section (and its section symbol), and return the section index.
     fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
         let (idx, offset) = self.new_string(name);
-        debug!("idx: {:?} @ {:#x} - new strtab offset: {:#x}", idx, offset, self.sizeof_strtab);
+        debug!(
+            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+            idx, offset, self.sizeof_strtab
+        );
         // store the size of this code
         let size = data.len();
         // the symbols section reference/index will be the current number of sections
@@ -492,16 +527,17 @@ impl<'a> Elf<'a> {
         let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
         section_symbol.st_shndx = shndx;
 
-        let mut section = section
-            .name_offset(offset)
-            .create(&self.ctx);
+        let mut section = section.name_offset(offset).create(&self.ctx);
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
-        self.sections.insert(idx, SectionInfo {
-            header: section,
-            symbol: section_symbol,
-            name: idx,
-        });
+        self.sections.insert(
+            idx,
+            SectionInfo {
+                header: section,
+                symbol: section_symbol,
+                name: idx,
+            },
+        );
         self.nsections += 1;
         // increment the size
         self.sizeof_bits += size;
@@ -511,7 +547,9 @@ impl<'a> Elf<'a> {
     }
     pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
-        let symbol = SymbolBuilder::new(SymbolType::Import).name_offset(offset).create();
+        let symbol = SymbolBuilder::new(SymbolType::Import)
+            .name_offset(offset)
+            .create();
         self.imports.insert(idx, kind.clone());
         self.symbols.insert(idx, symbol);
     }
@@ -520,44 +558,64 @@ impl<'a> Elf<'a> {
         let (to_idx, to_shndx) = {
             let to_idx = self.strings.get_or_intern(l.to.name);
             if l.to.decl.is_section() {
-                let (to_idx, _, _) = self.sections.get_full(&to_idx).expect("to_idx present in sections");
+                let (to_idx, _, _) = self
+                    .sections
+                    .get_full(&to_idx)
+                    .expect("to_idx present in sections");
                 // Section symbols come after special symbols.
                 // The section index is after null + strtab + symtab.
                 (to_idx + self.special_symbols.len(), to_idx + 3)
             } else {
-                let (to_idx, _, symbol) = self.symbols.get_full(&to_idx).expect("to_idx present in symbols");
+                let (to_idx, _, symbol) = self
+                    .symbols
+                    .get_full(&to_idx)
+                    .expect("to_idx present in symbols");
                 // Normal symbols come after special symbols and section symbols.
-                (to_idx + self.special_symbols.len() + self.sections.len(), symbol.st_shndx)
+                (
+                    to_idx + self.special_symbols.len() + self.sections.len(),
+                    symbol.st_shndx,
+                )
             }
         };
         let (from_idx, from_shndx) = {
             let from_idx = self.strings.get_or_intern(l.from.name);
             if l.from.decl.is_section() {
-                let (from_idx, _, _) = self.sections.get_full(&from_idx).expect("from_idx present in sections");
+                let (from_idx, _, _) = self
+                    .sections
+                    .get_full(&from_idx)
+                    .expect("from_idx present in sections");
                 // Section symbols come after special symbols.
                 // The section index is after null + strtab + symtab.
                 (from_idx + self.special_symbols.len(), from_idx + 3)
             } else {
-                let (from_idx, _, symbol) = self.symbols.get_full(&from_idx).expect("from_idx present in symbols");
+                let (from_idx, _, symbol) = self
+                    .symbols
+                    .get_full(&from_idx)
+                    .expect("from_idx present in symbols");
                 // Normal symbols come after special symbols and section symbols.
-                (from_idx + self.special_symbols.len() + self.sections.len(), symbol.st_shndx)
+                (
+                    from_idx + self.special_symbols.len() + self.sections.len(),
+                    symbol.st_shndx,
+                )
             }
         };
         let (reloc, addend) = match l.reloc {
             Reloc::Auto => {
                 match *l.from.decl {
-                    Decl::Function {..} => {
+                    Decl::Function { .. } => {
                         match *l.to.decl {
                             // NB: this now forces _all_ function references, whether local or not, through the PLT
                             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                            Decl::Function {..} | Decl::FunctionImport => (reloc::R_X86_64_PLT32, -4),
-                            Decl::Data {..} => (reloc::R_X86_64_PC32, -4),
-                            Decl::CString {..} => (reloc::R_X86_64_PC32, -4),
+                            Decl::Function { .. } | Decl::FunctionImport => {
+                                (reloc::R_X86_64_PLT32, -4)
+                            }
+                            Decl::Data { .. } => (reloc::R_X86_64_PC32, -4),
+                            Decl::CString { .. } => (reloc::R_X86_64_PC32, -4),
                             Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }
-                    },
-                    Decl::Data {..} => {
+                    }
+                    Decl::Data { .. } => {
                         if self.ctx.is_big() {
                             // Select an absolute relocation that is the size of a pointer.
                             (reloc::R_X86_64_64, 0)
@@ -569,18 +627,19 @@ impl<'a> Elf<'a> {
                 }
             }
             Reloc::Raw { reloc, addend } => (reloc, addend),
-            Reloc::Debug { size, addend } => {
-                match size {
-                    4 => (reloc::R_X86_64_32, addend),
-                    8 => (reloc::R_X86_64_64, addend),
-                    _ => panic!("unsupported relocation {:?}", l),
-                }
-            }
+            Reloc::Debug { size, addend } => match size {
+                4 => (reloc::R_X86_64_32, addend),
+                8 => (reloc::R_X86_64_64, addend),
+                _ => panic!("unsupported relocation {:?}", l),
+            },
         };
         let addend = i64::from(addend);
 
         let sym_idx = match *l.to.decl {
-            Decl::Function {..} | Decl::Data {..} | Decl::CString {..} | Decl::DebugSection {..} => {
+            Decl::Function { .. }
+            | Decl::Data { .. }
+            | Decl::CString { .. }
+            | Decl::DebugSection { .. } => {
                 // We don't emit symbols for null + strtab + symtab, and
                 // section symbols come after special symbols.
                 (to_shndx - 3) + self.special_symbols.len()
@@ -588,11 +647,18 @@ impl<'a> Elf<'a> {
             Decl::FunctionImport | Decl::DataImport => to_idx,
         };
 
-        let reloc = RelocationBuilder::new(reloc).sym(sym_idx).offset(l.at).addend(addend).create();
+        let reloc = RelocationBuilder::new(reloc)
+            .sym(sym_idx)
+            .offset(l.at)
+            .addend(addend)
+            .create();
         self.add_reloc(l.from.name, reloc, from_idx, from_shndx)
     }
     fn add_reloc(&mut self, relocee: &str, reloc: Relocation, idx: usize, shndx: usize) {
-        debug!("add reloc for symbol {} section {} - reloc: {:?}", idx, shndx, &reloc);
+        debug!(
+            "add reloc for symbol {} section {} - reloc: {:?}",
+            idx, shndx, &reloc
+        );
         let reloc_size = Relocation::size(reloc.r_addend.is_some(), self.ctx) as u64;
         if self.relocations.contains_key(&shndx) {
             debug!("{} has relocs", relocee);
@@ -604,12 +670,21 @@ impl<'a> Elf<'a> {
             debug!("{} does NOT have relocs", relocee);
             // now create the relocation section
             let reloc_name = {
-                let (_, section) = self.sections.get_index(shndx - 3).expect("shndx present in sections");
-                let section_name = self.strings.resolve(section.name).expect("section name in strings");
+                let (_, section) = self
+                    .sections
+                    .get_index(shndx - 3)
+                    .expect("shndx present in sections");
+                let section_name = self
+                    .strings
+                    .resolve(section.name)
+                    .expect("section name in strings");
                 format!(".rela{}", section_name)
             };
             let (_reloc_idx, reloc_section_offset) = self.new_string(reloc_name);
-            let mut reloc_section = SectionBuilder::new(reloc_size).name_offset(reloc_section_offset).section_type(SectionType::Relocation).create(&self.ctx);
+            let mut reloc_section = SectionBuilder::new(reloc_size)
+                .name_offset(reloc_section_offset)
+                .section_type(SectionType::Relocation)
+                .create(&self.ctx);
             // its sh_link always points to the symtable
             reloc_section.sh_link = SYMTAB_LINK as u32;
             // info tells us which section these relocations apply to
@@ -624,17 +699,23 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Compute Offsets
         /////////////////////////////////////
-        let sizeof_symtab = (self.symbols.len() +
-                             self.special_symbols.len() +
-                             self.sections.len()) * Symbol::size(self.ctx.container);
-        let sizeof_relocs = self.relocations.iter().fold(0, |acc, (_, &(ref _shdr, ref rels))| rels.len() + acc) * Relocation::size(true, self.ctx);
+        let sizeof_symtab = (self.symbols.len() + self.special_symbols.len() + self.sections.len())
+            * Symbol::size(self.ctx.container);
+        let sizeof_relocs = self
+            .relocations
+            .iter()
+            .fold(0, |acc, (_, &(ref _shdr, ref rels))| rels.len() + acc)
+            * Relocation::size(true, self.ctx);
         let nonexec_stack_note_name_offset = self.new_string(".note.GNU-stack".into()).1;
         let strtab_offset = self.sizeof_bits as u64;
         let symtab_offset = strtab_offset + self.sizeof_strtab as u64;
         let reloc_offset = symtab_offset + sizeof_symtab as u64;
         let sh_offset = reloc_offset + sizeof_relocs as u64;
 
-        debug!("strtab: {:#x} symtab {:#x} relocs {:#x} sh_offset {:#x}", strtab_offset, symtab_offset, reloc_offset, sh_offset);
+        debug!(
+            "strtab: {:#x} symtab {:#x} relocs {:#x} sh_offset {:#x}",
+            strtab_offset, symtab_offset, reloc_offset, sh_offset
+        );
 
         /////////////////////////////////////
         // Header
@@ -646,7 +727,7 @@ impl<'a> Elf<'a> {
         header.e_shoff = sh_offset;
         header.e_shnum = self.nsections;
         header.e_shstrndx = STRTAB_LINK;
-        
+
         file.iowrite_with(header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
         debug!("after_header {:#x}", after_header);
@@ -670,21 +751,26 @@ impl<'a> Elf<'a> {
         let mut section_headers = vec![SectionHeader::default()];
         let mut strtab = {
             let offset = *(self.offsets.get(&0).unwrap());
-            SectionBuilder::new(self.sizeof_strtab as u64).name_offset(offset).section_type(SectionType::StrTab).create(&self.ctx)
+            SectionBuilder::new(self.sizeof_strtab as u64)
+                .name_offset(offset)
+                .section_type(SectionType::StrTab)
+                .create(&self.ctx)
         };
         strtab.sh_offset = strtab_offset;
         section_headers.push(strtab);
 
         let mut symtab = {
             let offset = *(self.offsets.get(&1).unwrap());
-            SectionBuilder::new(sizeof_symtab as u64).name_offset(offset).section_type(SectionType::SymTab).create(&self.ctx)
+            SectionBuilder::new(sizeof_symtab as u64)
+                .name_offset(offset)
+                .section_type(SectionType::SymTab)
+                .create(&self.ctx)
         };
         symtab.sh_offset = symtab_offset;
         symtab.sh_link = 1; // we link to our strtab above
-        // FunFact: symtab.sh_info acts as a delimiter pointing to which are the "external" functions in the object file;
-        // if this isn't correct, it will segfault linkers or cause them to _sometimes_ emit garbage, ymmv
-        symtab.sh_info =
-            (self.special_symbols.len() + self.sections.len() + self.nlocals) as u32;
+                            // FunFact: symtab.sh_info acts as a delimiter pointing to which are the "external" functions in the object file;
+                            // if this isn't correct, it will segfault linkers or cause them to _sometimes_ emit garbage, ymmv
+        symtab.sh_info = (self.special_symbols.len() + self.sections.len() + self.nlocals) as u32;
         section_headers.push(symtab);
 
         /////////////////////////////////////
@@ -718,7 +804,11 @@ impl<'a> Elf<'a> {
             file.iowrite_with(symbol, self.ctx)?;
         }
         let after_symtab = file.seek(Current(0))?;
-        debug!("after_symtab {:#x} - shdr_size {}", after_symtab, Section::size(&self.ctx));
+        debug!(
+            "after_symtab {:#x} - shdr_size {}",
+            after_symtab,
+            Section::size(&self.ctx)
+        );
         assert_eq!(after_symtab, reloc_offset);
 
         /////////////////////////////////////
