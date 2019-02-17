@@ -11,8 +11,8 @@ use std::io::Write;
 
 use crate::{elf, mach};
 
-mod decl;
-pub use decl::*;
+pub(crate) mod decl;
+pub use decl::Decl;
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
