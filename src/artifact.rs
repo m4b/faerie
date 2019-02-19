@@ -52,20 +52,6 @@ pub enum ArtifactError {
     DuplicateDefinition(String),
 }
 
-///////////////////////////////////////////////
-// NOTE:
-// Good citizen, you are hereby forewarned:
-//
-// Do not change the ordering of any fields in Prop or InternalDefinition
-// because:
-// 1. BTreeSet depends on it
-// 2. Backends (e.g. ELF) rely on it to receive the definitions as locals first, etc.
-//
-// If it is changed, it must obey the invariant that:
-//   iteration via `definitions()` returns _local_ (i.e., non global) definitions first
-//   (the ordering of properties thereafter is not specified nor currently relevant)
-//   _and then_ global definitions
-///////////////////////////////////////////////
 /// The properties associated with a symbolic reference
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Prop {
@@ -82,8 +68,6 @@ struct InternalDefinition {
     name: StringID,
     data: Data,
 }
-// end note
-///////////////////////////////////////////////
 
 /// A declaration, plus a flag to track whether we have a definition for it yet
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -221,7 +205,8 @@ pub struct Artifact {
     import_links: Vec<Relocation>,
     links: Vec<Relocation>,
     declarations: IndexMap<StringID, InternalDecl>,
-    definitions: BTreeSet<InternalDefinition>,
+    local_definitions: BTreeSet<InternalDefinition>,
+    nonlocal_definitions: BTreeSet<InternalDefinition>,
     strings: DefaultStringInterner,
 }
 
@@ -239,7 +224,8 @@ impl Artifact {
             target,
             is_library: false,
             declarations: IndexMap::new(),
-            definitions: BTreeSet::new(),
+            local_definitions: BTreeSet::new(),
+            nonlocal_definitions: BTreeSet::new(),
             strings: DefaultStringInterner::default(),
         }
     }
@@ -253,8 +239,9 @@ impl Artifact {
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
         Box::new(
-            self.definitions
+            self.local_definitions
                 .iter()
+                .chain(self.nonlocal_definitions.iter())
                 .map(move |int_def| Definition::from((int_def, &self.strings))),
         )
     }
@@ -404,11 +391,19 @@ impl Artifact {
                     }
                     _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
-                self.definitions.insert(InternalDefinition {
-                    name: decl_name,
-                    data,
-                    prop,
-                });
+                if prop.global {
+                    self.nonlocal_definitions.insert(InternalDefinition {
+                        name: decl_name,
+                        data,
+                        prop,
+                    });
+                } else {
+                    self.local_definitions.insert(InternalDefinition {
+                        name: decl_name,
+                        data,
+                        prop,
+                    });
+                }
                 stype.define();
             }
             None => return Err(ArtifactError::Undeclared(name.as_ref().to_string())),
