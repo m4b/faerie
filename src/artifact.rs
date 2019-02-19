@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::Decl;
+pub use decl::{Decl, ADecl, ImportKind};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -134,25 +134,6 @@ pub struct Link<'a> {
     pub to: &'a str,
     /// The byte offset _relative_ to `from` where the relocation should be performed
     pub at: u64,
-}
-
-/// The kind of import this is - either a function, or a copy relocation of data from a shared library
-#[derive(Debug, Clone)]
-pub enum ImportKind {
-    /// A function
-    Function,
-    /// An imported piece of data
-    Data,
-}
-
-impl ImportKind {
-    fn from_decl(decl: &Decl) -> Option<Self> {
-        match decl {
-            &Decl::DataImport => Some(ImportKind::Data),
-            &Decl::FunctionImport => Some(ImportKind::Function),
-            _ => None,
-        }
-    }
 }
 
 /// Builder for creating an artifact
@@ -302,7 +283,7 @@ impl Artifact {
             previous
         };
         match new_idecl.decl {
-            Decl::DataImport | Decl::FunctionImport => {
+            Decl::Import(_) => {
                 // we have to check because otherwise duplicate imports cause an error
                 // FIXME: ditto fixme, below, use orderset
                 let mut present = false;
@@ -357,39 +338,39 @@ impl Artifact {
                         name.as_ref().to_string(),
                     ));
                 }
-                let prop = match stype.decl {
-                    Decl::CString { global } => Prop {
-                        global,
-                        function: false,
-                        writable: false,
-                        cstring: true,
-                        section: false,
-                    },
-                    Decl::Data { global, writable } => Prop {
-                        global,
-                        function: false,
-                        writable,
-                        cstring: false,
-                        section: false,
-                    },
-                    Decl::Function { global } => Prop {
-                        global,
-                        function: true,
-                        writable: false,
-                        cstring: false,
-                        section: false,
-                    },
-                    Decl::DebugSection { .. } => Prop {
-                        global: false,
-                        function: false,
-                        writable: false,
-                        cstring: false,
-                        section: true,
-                    },
-                    _ if stype.decl.is_import() => {
-                        return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into());
+                let prop = if let Decl::Artifact(adecl) = stype.decl {
+                    match adecl {
+                        ADecl::CString { global } => Prop {
+                            global,
+                            function: false,
+                            writable: false,
+                            cstring: true,
+                            section: false,
+                        },
+                        ADecl::Data { global, writable } => Prop {
+                            global,
+                            function: false,
+                            writable,
+                            cstring: false,
+                            section: false,
+                        },
+                        ADecl::Function { global } => Prop {
+                            global,
+                            function: true,
+                            writable: false,
+                            cstring: false,
+                            section: false,
+                        },
+                        ADecl::DebugSection { .. } => Prop {
+                            global: false,
+                            function: false,
+                            writable: false,
+                            cstring: false,
+                            section: true,
+                        },
                     }
-                    _ => unimplemented!("New Decl variant added but not covered in define method"),
+                } else {
+                    return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into());
                 };
                 if prop.global {
                     self.nonlocal_definitions.insert(InternalDefinition {
@@ -413,13 +394,7 @@ impl Artifact {
     /// Declare `import` to be an import with `kind`.
     /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
-        self.declare(
-            import.as_ref(),
-            match &kind {
-                &ImportKind::Function => Decl::FunctionImport,
-                &ImportKind::Data => Decl::DataImport,
-            },
-        )?;
+        self.declare(import.as_ref(), Decl::Import(kind))?;
         Ok(())
     }
     /// Link a relocation at `link.at` from `link.from` to `link.to`

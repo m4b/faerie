@@ -204,14 +204,14 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     // FIXME: need to state this isn't a string, but some linkers don't seem to care \o/
     // gold complains though:
     // ld.gold: warning: deadbeef.o: last entry in mergeable string section '.data.DEADBEEF' not null terminated
-    obj.declare("DEADBEEF", Decl::Data { global: true, writable: false })?;
+    obj.declare("DEADBEEF", Decl::data().global().read_only())?;
     obj.define("DEADBEEF", [0xef, 0xbe, 0xad, 0xde].to_vec())?;
 
     if args.dwarf {
         // DWARF sections
-        obj.declare(".debug_abbrev", Decl::DebugSection)?;
-        obj.declare(".debug_info", Decl::DebugSection)?;
-        obj.declare(".debug_str", Decl::DebugSection)?;
+        obj.declare(".debug_abbrev", Decl::debug_section())?;
+        obj.declare(".debug_info", Decl::debug_section())?;
+        obj.declare(".debug_str", Decl::debug_section())?;
 
         obj.define(".debug_str",
             concat![

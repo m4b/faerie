@@ -4,10 +4,30 @@ use failure::Error;
 /// The kind of declaration this is
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Decl {
-    /// An import of a function/routine defined in a shared library
-    FunctionImport,
-    /// A GOT-based import of data defined in a shared library
-    DataImport,
+    Import(ImportKind),
+    Artifact(ADecl),
+}
+
+/// The kind of import this is - either a function, or a copy relocation of data from a shared library
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ImportKind {
+    /// A function
+    Function,
+    /// An imported piece of data
+    Data,
+}
+
+impl ImportKind {
+    pub fn from_decl(decl: &Decl) -> Option<Self> {
+        match decl {
+            Decl::Import(ik) => Some(*ik),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ADecl {
     /// A function defined in this artifact
     Function { global: bool },
     /// A data object defined in this artifact
@@ -60,14 +80,14 @@ impl Decl {
     pub fn absorb(&mut self, other: Self) -> Result<(), Error> {
         // FIXME: i can't think of a way offhand to not clone here, without unusual contortions
         match self.clone() {
-            Decl::DataImport => {
+            Decl::Import(ImportKind::Data) => {
                 match other {
                     // data imports can be upgraded to any kind of data declaration
-                    Decl::Data { .. } => {
+                    Decl::Artifact(ADecl::Data { .. }) => {
                         *self = other;
                         Ok(())
                     }
-                    Decl::DataImport => Ok(()),
+                    Decl::Import(ImportKind::Data) => Ok(()),
                     _ => Err(ArtifactError::IncompatibleDeclaration {
                         old: *self,
                         new: other,
@@ -75,14 +95,14 @@ impl Decl {
                     .into()),
                 }
             }
-            Decl::FunctionImport => {
+            Decl::Import(ImportKind::Function) => {
                 match other {
                     // function imports can be upgraded to any kind of function declaration
-                    Decl::Function { .. } => {
+                    Decl::Artifact(ADecl::Function { .. }) => {
                         *self = other;
                         Ok(())
                     }
-                    Decl::FunctionImport => Ok(()),
+                    Decl::Import(ImportKind::Function) => Ok(()),
                     _ => Err(ArtifactError::IncompatibleDeclaration {
                         old: *self,
                         new: other,
@@ -92,8 +112,8 @@ impl Decl {
             }
             // a previous data declaration can only be re-declared a data import, or it must match exactly the
             // next declaration
-            decl @ Decl::Data { .. } => match other {
-                Decl::DataImport => Ok(()),
+            decl @ Decl::Artifact(ADecl::Data { .. }) => match other {
+                Decl::Import(ImportKind::Data) => Ok(()),
                 other => {
                     if decl == other {
                         Ok(())
@@ -108,8 +128,8 @@ impl Decl {
             },
             // a previous function decl can only be re-declared a function import, or it must match exactly
             // the next declaration
-            decl @ Decl::Function { .. } => match other {
-                Decl::FunctionImport => Ok(()),
+            decl @ Decl::Artifact(ADecl::Function { .. }) => match other {
+                Decl::Import(ImportKind::Function) => Ok(()),
                 other => {
                     if decl == other {
                         Ok(())
@@ -137,17 +157,15 @@ impl Decl {
     }
     /// Is this an import (function or data) from a shared library?
     pub fn is_import(&self) -> bool {
-        use Decl::*;
         match *self {
-            FunctionImport => true,
-            DataImport => true,
+            Decl::Import(_) => true,
             _ => false,
         }
     }
     /// Is this a section?
     pub fn is_section(&self) -> bool {
         match *self {
-            Decl::DebugSection { .. } => true,
+            Decl::Artifact(ADecl::DebugSection { .. }) => true,
             _ => false,
         }
     }
@@ -163,7 +181,7 @@ impl Default for FunctionImportDecl {
 
 impl Into<Decl> for FunctionImportDecl {
     fn into(self) -> Decl {
-        Decl::FunctionImport
+        Decl::Import(ImportKind::Function)
     }
 }
 
@@ -177,7 +195,7 @@ impl Default for DataImportDecl {
 
 impl Into<Decl> for DataImportDecl {
     fn into(self) -> Decl {
-        Decl::DataImport
+        Decl::Import(ImportKind::Data)
     }
 }
 
@@ -204,9 +222,9 @@ impl FunctionDecl {
 
 impl Into<Decl> for FunctionDecl {
     fn into(self) -> Decl {
-        Decl::Function {
+        Decl::Artifact(ADecl::Function {
             global: self.global,
-        }
+        })
     }
 }
 
@@ -245,10 +263,10 @@ impl DataDecl {
 
 impl Into<Decl> for DataDecl {
     fn into(self) -> Decl {
-        Decl::Data {
+        Decl::Artifact(ADecl::Data {
             global: self.global,
             writable: self.writable,
-        }
+        })
     }
 }
 
@@ -275,9 +293,9 @@ impl CStringDecl {
 
 impl Into<Decl> for CStringDecl {
     fn into(self) -> Decl {
-        Decl::CString {
+        Decl::Artifact(ADecl::CString {
             global: self.global,
-        }
+        })
     }
 }
 
@@ -291,6 +309,6 @@ impl Default for DebugSectionDecl {
 
 impl Into<Decl> for DebugSectionDecl {
     fn into(self) -> Decl {
-        Decl::DebugSection
+        Decl::Artifact(ADecl::DebugSection)
     }
 }
