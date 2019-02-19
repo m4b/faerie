@@ -1,6 +1,6 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{Decl, Definition, Reloc};
+use crate::artifact::{Decl, ImportKind, ADecl, Definition, Reloc};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
@@ -780,25 +780,34 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                 // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
                 // e.g., global static data references, are constructed from Data -> Data links
                 match (link.from.decl, link.to.decl) {
-                    (&Decl::DebugSection { .. }, _) => {
+                    (Decl::Artifact(ADecl::DebugSection { .. }), _) => {
                         panic!("must use Reloc::Debug for debug section links")
                     }
                     // only debug sections should link to debug sections
-                    (_, &Decl::DebugSection { .. }) => panic!("invalid DebugSection link"),
+                    (_, Decl::Artifact(ADecl::DebugSection { .. })) => {
+                        panic!("invalid DebugSection link")
+                    }
                     // various static function pointers in the .data section
-                    (&Decl::Data { .. }, &Decl::Function { .. }) => (true, X86_64_RELOC_UNSIGNED),
-                    (&Decl::Data { .. }, &Decl::FunctionImport { .. }) => {
+                    (
+                        Decl::Artifact(ADecl::Data { .. }),
+                        Decl::Artifact(ADecl::Function { .. }),
+                    ) => (true, X86_64_RELOC_UNSIGNED),
+                    (
+                        Decl::Artifact(ADecl::Data { .. }),
+                        Decl::Import(ImportKind::Function { .. }),
+                    ) => (true, X86_64_RELOC_UNSIGNED),
+                    // anything else is just a regular relocation/callq
+                    (_, Decl::Artifact(ADecl::Function { .. })) => (false, X86_64_RELOC_BRANCH),
+                    // we are a relocation in the data section to another object
+                    // in the data section, e.g., a static reference
+                    (Decl::Artifact(ADecl::Data { .. }), Decl::Artifact(ADecl::Data { .. })) => {
                         (true, X86_64_RELOC_UNSIGNED)
                     }
-                    // anything else is just a regular relocation/callq
-                    (_, &Decl::Function { .. }) => (false, X86_64_RELOC_BRANCH),
-                    // we are a relocation in the data section to another object in the data section, e.g., a static reference
-                    (&Decl::Data { .. }, &Decl::Data { .. }) => (true, X86_64_RELOC_UNSIGNED),
-                    (_, &Decl::Data { .. }) => (false, X86_64_RELOC_SIGNED),
+                    (_, Decl::Artifact(ADecl::Data { .. })) => (false, X86_64_RELOC_SIGNED),
                     // TODO: we will also need to specify relocations from Data to Cstrings, e.g., char * STR = "a global static string";
-                    (_, &Decl::CString { .. }) => (false, X86_64_RELOC_SIGNED),
-                    (_, &Decl::FunctionImport) => (false, X86_64_RELOC_BRANCH),
-                    (_, &Decl::DataImport) => (false, X86_64_RELOC_GOT_LOAD),
+                    (_, Decl::Artifact(ADecl::CString { .. })) => (false, X86_64_RELOC_SIGNED),
+                    (_, Decl::Import(ImportKind::Function)) => (false, X86_64_RELOC_BRANCH),
+                    (_, Decl::Import(ImportKind::Data)) => (false, X86_64_RELOC_GOT_LOAD),
                 }
             }
             Reloc::Raw { reloc, addend } => {

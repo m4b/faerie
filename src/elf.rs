@@ -6,9 +6,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    artifact::{self, LinkAndDecl, Reloc},
+    artifact::{self, ADecl, Artifact, Decl, ImportKind, LinkAndDecl, Reloc},
     target::make_ctx,
-    Artifact, Ctx, Decl, ImportKind,
+    Ctx,
 };
 use failure::Error;
 use goblin;
@@ -602,20 +602,20 @@ impl<'a> Elf<'a> {
         let (reloc, addend) = match l.reloc {
             Reloc::Auto => {
                 match *l.from.decl {
-                    Decl::Function { .. } => {
+                    Decl::Artifact(ADecl::Function { .. }) => {
                         match *l.to.decl {
                             // NB: this now forces _all_ function references, whether local or not, through the PLT
                             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                            Decl::Function { .. } | Decl::FunctionImport => {
+                            Decl::Artifact(ADecl::Function { .. }) | Decl::Import(ImportKind::Function) => {
                                 (reloc::R_X86_64_PLT32, -4)
                             }
-                            Decl::Data { .. } => (reloc::R_X86_64_PC32, -4),
-                            Decl::CString { .. } => (reloc::R_X86_64_PC32, -4),
-                            Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+                            Decl::Artifact(ADecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
+                            Decl::Artifact(ADecl::CString { .. }) => (reloc::R_X86_64_PC32, -4),
+                            Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }
                     }
-                    Decl::Data { .. } => {
+                    Decl::Artifact(ADecl::Data { .. }) => {
                         if self.ctx.is_big() {
                             // Select an absolute relocation that is the size of a pointer.
                             (reloc::R_X86_64_64, 0)
@@ -636,15 +636,12 @@ impl<'a> Elf<'a> {
         let addend = i64::from(addend);
 
         let sym_idx = match *l.to.decl {
-            Decl::Function { .. }
-            | Decl::Data { .. }
-            | Decl::CString { .. }
-            | Decl::DebugSection { .. } => {
+            Decl::Artifact(_) => {
                 // We don't emit symbols for null + strtab + symtab, and
                 // section symbols come after special symbols.
                 (to_shndx - 3) + self.special_symbols.len()
             }
-            Decl::FunctionImport | Decl::DataImport => to_idx,
+            Decl::Import(_) => to_idx,
         };
 
         let reloc = RelocationBuilder::new(reloc)
