@@ -81,14 +81,14 @@ fn run (args: Args) -> Result<(), Error> {
 
     // first we declare our symbolic references;
     // it is a runtime error to define a symbol _without_ declaring it first
-    let declarations = vec![
-        ("deadbeef",   Decl::Function { global: false }),
-        ("main",       Decl::Function { global: true }),
-        ("str.1",      Decl::CString { global: false }),
-        ("DEADBEEF",   Decl::DataImport),
-        ("STATIC",     Decl::Data { global: true, writable: true }),
-        ("STATIC_REF", Decl::Data { global: true, writable: true }),
-        ("printf",     Decl::FunctionImport),
+    let declarations: Vec<(&'static str, Decl)> = vec![
+        ("deadbeef", Decl::function().into()),
+        ("main", Decl::function().global().into()),
+        ("str.1", Decl::cstring().into()),
+        ("DEADBEEF", Decl::data_import().into()),
+        ("STATIC", Decl::data().global().writable().into()),
+        ("STATIC_REF", Decl::data().global().writable().into()),
+        ("printf", Decl::function_import().into()),
     ];
     obj.declarations(declarations.into_iter())?;
 

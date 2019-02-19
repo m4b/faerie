@@ -17,4 +17,10 @@ mod mach;
 mod target;
 
 pub mod artifact;
-pub use crate::artifact::{Artifact, ArtifactBuilder, Decl, ImportKind, Link, Reloc};
+pub use crate::artifact::{
+    decl::{
+        CStringDecl, DataDecl, DataImportDecl, DebugSectionDecl, Decl, FunctionDecl,
+        FunctionImportDecl,
+    },
+    Artifact, ArtifactBuilder, ImportKind, Link, Reloc,
+};
