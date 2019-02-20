@@ -1,3 +1,6 @@
+#![deny(missing_docs)]
+//! Faerie is a crate for creating object files.
+
 extern crate goblin;
 extern crate indexmap;
 extern crate scroll;
@@ -15,6 +18,7 @@ type Ctx = container::Ctx;
 mod elf;
 mod mach;
 mod target;
+
 
 pub mod artifact;
 pub use crate::artifact::{

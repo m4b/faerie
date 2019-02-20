@@ -24,9 +24,19 @@ pub enum Reloc {
     Auto,
     /// A raw relocation and its addend, to optionally override the "auto" relocation behavior of faerie.
     /// **NB**: This is implementation defined, and can break code invariants if used improperly, you have been warned.
-    Raw { reloc: u32, addend: i32 },
+    Raw {
+        /// Raw relocation, as an integer value to be encoded by the backend
+        reloc: u32,
+        /// Raw addend, significance depends on the raw relocation used
+        addend: i32,
+    },
     /// A relocation in a debug section.
-    Debug { size: u8, addend: i32 },
+    Debug {
+        /// Size (in bytes) of the pointer to be relocated
+        size: u8,
+        /// Addend for the relocation
+        addend: i32,
+    },
 }
 
 type StringID = usize;
@@ -36,10 +46,13 @@ type Relocation = (StringID, StringID, u64, Reloc);
 #[derive(Fail, Debug)]
 pub enum ArtifactError {
     #[fail(display = "Undeclared symbolic reference to: {}", _0)]
+    /// Undeclarated symbolic reference
     Undeclared(String),
     #[fail(display = "Attempt to define an undefined import: {}", _0)]
+    /// Attempt to define an undefined import
     ImportDefined(String),
     #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
+    /// Attempt to use a relocation inside an import
     RelocateImport(String),
     // FIXME: don't use debugging prints for decl formats
     #[fail(
@@ -47,8 +60,14 @@ pub enum ArtifactError {
         old, new
     )]
     /// An incompatble declaration occurred, please see the [absorb](enum.Decl.html#method.absorb) method on `Decl`
-    IncompatibleDeclaration { old: Decl, new: Decl },
+    IncompatibleDeclaration {
+        /// Previously provided declaration
+        old: Decl,
+        /// Declaration that caused this error
+        new: Decl,
+    },
     #[fail(display = "duplicate definition of symbol: {}", _0)]
+    /// A duplicate definition
     DuplicateDefinition(String),
 }
 
@@ -83,24 +102,33 @@ impl InternalDecl {
 /// A binding of a raw `name` to its declaration, `decl`
 #[derive(Debug)]
 pub struct Binding<'a> {
+    /// Name of symbol
     pub name: &'a str,
+    /// Declaration of symbol
     pub decl: &'a Decl,
 }
 
 /// A relocation binding one declaration to another
 #[derive(Debug)]
 pub struct LinkAndDecl<'a> {
+    /// Relocation is inside this symbol
     pub from: Binding<'a>,
+    /// Targeting this symbol
     pub to: Binding<'a>,
+    /// Offset into `from`
     pub at: u64,
+    /// Type of relocation to use
     pub reloc: Reloc,
 }
 
 /// A definition of a symbol with its properties the various backends receive
 #[derive(Debug)]
 pub(crate) struct Definition<'a> {
+    /// Name of symbol
     pub name: &'a str,
+    /// Contents of definition
     pub data: &'a [u8],
+    /// Declaration of symbol
     pub decl: &'a DefinedDecl,
 }
 
@@ -152,6 +180,7 @@ impl ArtifactBuilder {
         self.library = is_library;
         self
     }
+    /// Build into an Artifact
     pub fn finish(self) -> Artifact {
         let name = self.name.unwrap_or_else(|| "faerie.o".to_owned());
         let mut artifact = Artifact::new(self.target, name);

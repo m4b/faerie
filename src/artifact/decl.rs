@@ -4,7 +4,9 @@ use failure::Error;
 /// The kind of declaration this is
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Decl {
+    /// Declaration of an import
     Import(ImportKind),
+    /// Declaration of an item to be defined in this artifact
     Defined(DefinedDecl),
 }
 
@@ -18,6 +20,7 @@ pub enum ImportKind {
 }
 
 impl ImportKind {
+    /// Accessor for the ImportKind associated with a Decl, if there is one
     pub fn from_decl(decl: &Decl) -> Option<Self> {
         match decl {
             Decl::Import(ik) => Some(*ik),
