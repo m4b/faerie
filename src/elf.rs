@@ -851,10 +851,10 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        if let DefinedDecl::DebugSection = def.adecl {
-            elf.add_section(def.name, def.data, def.adecl);
+        if let DefinedDecl::DebugSection { .. } = def.decl {
+            elf.add_section(def.name, def.data, def.decl);
         } else {
-            elf.add_definition(def.name, def.data, def.adecl);
+            elf.add_definition(def.name, def.data, def.decl);
         }
     }
     for (ref import, ref kind) in artifact.imports() {

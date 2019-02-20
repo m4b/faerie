@@ -54,7 +54,7 @@ pub enum ArtifactError {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
-    adecl: DefinedDecl,
+    decl: DefinedDecl,
     name: StringID,
     data: Data,
 }
@@ -101,7 +101,7 @@ pub struct LinkAndDecl<'a> {
 pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
-    pub adecl: &'a DefinedDecl,
+    pub decl: &'a DefinedDecl,
 }
 
 impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
@@ -111,7 +111,7 @@ impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definitio
                 .resolve(def.name)
                 .expect("internal definition to have name"),
             data: &def.data,
-            adecl: &def.adecl,
+            decl: &def.decl,
         }
     }
 }
@@ -322,23 +322,23 @@ impl Artifact {
                         name.as_ref().to_string(),
                     ))?;
                 }
-                let adecl = match stype.decl {
-                    Decl::Defined(adecl) => adecl,
+                let decl = match stype.decl {
+                    Decl::Defined(decl) => decl,
                     Decl::Import(_) => {
                         Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
                     }
                 };
-                if adecl.is_global() {
+                if decl.is_global() {
                     self.nonlocal_definitions.insert(InternalDefinition {
                         name: decl_name,
                         data,
-                        adecl,
+                        decl,
                     });
                 } else {
                     self.local_definitions.insert(InternalDefinition {
                         name: decl_name,
                         data,
-                        adecl,
+                        decl,
                     });
                 }
                 stype.define();

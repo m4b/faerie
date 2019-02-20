@@ -27,15 +27,16 @@ impl ImportKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// A declaration that is defined inside this artifact
 pub enum DefinedDecl {
     /// A function defined in this artifact
-    Function { global: bool },
+    Function(FunctionDecl),
     /// A data object defined in this artifact
-    Data { global: bool, writable: bool },
+    Data(DataDecl),
     /// A null-terminated string object defined in this artifact
-    CString { global: bool },
+    CString(CStringDecl),
     /// A DWARF debug section defined in this artifact
-    DebugSection,
+    DebugSection(DebugSectionDecl),
 }
 
 impl DefinedDecl {
@@ -74,20 +75,20 @@ impl DefinedDecl {
     /// Accessor to determine whether scope is global
     pub fn is_global(&self) -> bool {
         match self {
-            DefinedDecl::Function { global, .. } => *global,
-            DefinedDecl::Data { global, .. } => *global,
-            DefinedDecl::CString { global, .. } => *global,
-            DefinedDecl::DebugSection { .. } => false,
+            DefinedDecl::Function(a) => a.is_global(),
+            DefinedDecl::Data(a) => a.is_global(),
+            DefinedDecl::CString(a) => a.is_global(),
+            DefinedDecl::DebugSection(a) => a.is_global(),
         }
     }
 
     /// Accessor to determine whether contents are writable
     pub fn is_writable(&self) -> bool {
         match self {
-            DefinedDecl::Data { writable, .. } => *writable,
-            DefinedDecl::Function { .. }
-            | DefinedDecl::CString { .. }
-            | DefinedDecl::DebugSection { .. } => false,
+            DefinedDecl::Data(a) => a.is_writable(),
+            DefinedDecl::Function(_) | DefinedDecl::CString(_) | DefinedDecl::DebugSection(_) => {
+                false
+            }
         }
     }
 }
@@ -225,6 +226,8 @@ impl Decl {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for function import declarations
 pub struct FunctionImportDecl {}
 
 impl Default for FunctionImportDecl {
@@ -239,6 +242,8 @@ impl Into<Decl> for FunctionImportDecl {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for data import declarations
 pub struct DataImportDecl {}
 
 impl Default for DataImportDecl {
@@ -253,6 +258,8 @@ impl Into<Decl> for DataImportDecl {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for function declarations
 pub struct FunctionDecl {
     global: bool,
 }
@@ -264,24 +271,30 @@ impl Default for FunctionDecl {
 }
 
 impl FunctionDecl {
+    /// Set binding to global
     pub fn global(mut self) -> Self {
         self.global = true;
         self
     }
+    /// Set binding to local
     pub fn local(mut self) -> Self {
         self.global = false;
         self
+    }
+    /// Accessor for binding
+    pub fn is_global(&self) -> bool {
+        self.global
     }
 }
 
 impl Into<Decl> for FunctionDecl {
     fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::Function {
-            global: self.global,
-        })
+        Decl::Defined(DefinedDecl::Function(self))
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for data declarations
 pub struct DataDecl {
     global: bool,
     writable: bool,
@@ -297,33 +310,44 @@ impl Default for DataDecl {
 }
 
 impl DataDecl {
+    /// Set binding to global
     pub fn global(mut self) -> Self {
         self.global = true;
         self
     }
+    /// Set binding to local
     pub fn local(mut self) -> Self {
         self.global = false;
         self
     }
+    /// Accessor for binding
+    pub fn is_global(&self) -> bool {
+        self.global
+    }
+    /// Set mutability to writable
     pub fn writable(mut self) -> Self {
         self.writable = true;
         self
     }
+    /// Set mutability to read-only
     pub fn read_only(mut self) -> Self {
         self.writable = false;
         self
+    }
+    /// Accessor for mutability
+    pub fn is_writable(&self) -> bool {
+        self.writable
     }
 }
 
 impl Into<Decl> for DataDecl {
     fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::Data {
-            global: self.global,
-            writable: self.writable,
-        })
+        Decl::Defined(DefinedDecl::Data(self))
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for a CString (0-terminated character sequence) declaration
 pub struct CStringDecl {
     global: bool,
 }
@@ -335,25 +359,39 @@ impl Default for CStringDecl {
 }
 
 impl CStringDecl {
+    /// Set binding to global
     pub fn global(mut self) -> Self {
         self.global = true;
         self
     }
+    /// Set binding to local
     pub fn local(mut self) -> Self {
         self.global = false;
         self
+    }
+    /// Accessor for binding
+    pub fn is_global(&self) -> bool {
+        self.global
     }
 }
 
 impl Into<Decl> for CStringDecl {
     fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::CString {
-            global: self.global,
-        })
+        Decl::Defined(DefinedDecl::CString(self))
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for a debug section declaration
 pub struct DebugSectionDecl {}
+
+impl DebugSectionDecl {
+    /// Debug sections are never global, but we have an accessor
+    /// for symmetry with other section declarations
+    pub fn is_global(&self) -> bool {
+        false
+    }
+}
 
 impl Default for DebugSectionDecl {
     fn default() -> Self {
@@ -363,6 +401,6 @@ impl Default for DebugSectionDecl {
 
 impl Into<Decl> for DebugSectionDecl {
     fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::DebugSection)
+        Decl::Defined(DefinedDecl::DebugSection(self))
     }
 }

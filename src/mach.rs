@@ -427,7 +427,7 @@ impl SegmentBuilder {
         let mut local_size = 0;
         let mut segment_relative_offset = 0;
         for def in definitions {
-            if let DefinedDecl::DebugSection { .. } = def.adecl {
+            if let DefinedDecl::DebugSection { .. } = def.decl {
                 unimplemented!("debug sections for mach backend")
             }
             local_size += def.data.len() as u64;
@@ -437,7 +437,7 @@ impl SegmentBuilder {
                     section,
                     segment_relative_offset,
                     absolute_offset: *symbol_offset,
-                    global: def.adecl.is_global(),
+                    global: def.decl.is_global(),
                 },
             );
             *symbol_offset += def.data.len() as u64;
@@ -570,7 +570,7 @@ impl<'a> Mach<'a> {
         let (mut code, mut data, mut cstrings, mut debug) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for def in artifact.definitions() {
-            match def.adecl {
+            match def.decl {
                 DefinedDecl::Function { .. } => {
                     code.push(def);
                 }
