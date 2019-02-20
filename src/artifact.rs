@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::{ADecl, Decl, ImportKind};
+pub use decl::{DefinedDecl, Decl, ImportKind};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -54,7 +54,7 @@ pub enum ArtifactError {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
-    adecl: ADecl,
+    adecl: DefinedDecl,
     name: StringID,
     data: Data,
 }
@@ -101,7 +101,7 @@ pub struct LinkAndDecl<'a> {
 pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
-    pub adecl: &'a ADecl,
+    pub adecl: &'a DefinedDecl,
 }
 
 impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
@@ -323,7 +323,7 @@ impl Artifact {
                     ))?;
                 }
                 let adecl = match stype.decl {
-                    Decl::Artifact(adecl) => adecl,
+                    Decl::Defined(adecl) => adecl,
                     Decl::Import(_) => {
                         Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
                     }

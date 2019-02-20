@@ -5,7 +5,7 @@ use failure::Error;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Decl {
     Import(ImportKind),
-    Artifact(ADecl),
+    Defined(DefinedDecl),
 }
 
 /// The kind of import this is - either a function, or a copy relocation of data from a shared library
@@ -27,7 +27,7 @@ impl ImportKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ADecl {
+pub enum DefinedDecl {
     /// A function defined in this artifact
     Function { global: bool },
     /// A data object defined in this artifact
@@ -38,22 +38,22 @@ pub enum ADecl {
     DebugSection,
 }
 
-impl ADecl {
+impl DefinedDecl {
     /// Accessor to determine whether scope is global
     pub fn is_global(&self) -> bool {
         match self {
-            ADecl::Function { global, .. } => *global,
-            ADecl::Data { global, .. } => *global,
-            ADecl::CString { global, .. } => *global,
-            ADecl::DebugSection { .. } => false,
+            DefinedDecl::Function { global, .. } => *global,
+            DefinedDecl::Data { global, .. } => *global,
+            DefinedDecl::CString { global, .. } => *global,
+            DefinedDecl::DebugSection { .. } => false,
         }
     }
 
     /// Accessor to determine whether contents are writable
     pub fn is_writable(&self) -> bool {
         match self {
-            ADecl::Data { writable, .. } => *writable,
-            ADecl::Function { .. } | ADecl::CString { .. } | ADecl::DebugSection { .. } => false,
+            DefinedDecl::Data { writable, .. } => *writable,
+            DefinedDecl::Function { .. } | DefinedDecl::CString { .. } | DefinedDecl::DebugSection { .. } => false,
         }
     }
 }
@@ -103,7 +103,7 @@ impl Decl {
             Decl::Import(ImportKind::Data) => {
                 match other {
                     // data imports can be upgraded to any kind of data declaration
-                    Decl::Artifact(ADecl::Data { .. }) => {
+                    Decl::Defined(DefinedDecl::Data { .. }) => {
                         *self = other;
                         Ok(())
                     }
@@ -118,7 +118,7 @@ impl Decl {
             Decl::Import(ImportKind::Function) => {
                 match other {
                     // function imports can be upgraded to any kind of function declaration
-                    Decl::Artifact(ADecl::Function { .. }) => {
+                    Decl::Defined(DefinedDecl::Function { .. }) => {
                         *self = other;
                         Ok(())
                     }
@@ -132,7 +132,7 @@ impl Decl {
             }
             // a previous data declaration can only be re-declared a data import, or it must match exactly the
             // next declaration
-            decl @ Decl::Artifact(ADecl::Data { .. }) => match other {
+            decl @ Decl::Defined(DefinedDecl::Data { .. }) => match other {
                 Decl::Import(ImportKind::Data) => Ok(()),
                 other => {
                     if decl == other {
@@ -148,7 +148,7 @@ impl Decl {
             },
             // a previous function decl can only be re-declared a function import, or it must match exactly
             // the next declaration
-            decl @ Decl::Artifact(ADecl::Function { .. }) => match other {
+            decl @ Decl::Defined(DefinedDecl::Function { .. }) => match other {
                 Decl::Import(ImportKind::Function) => Ok(()),
                 other => {
                     if decl == other {
@@ -185,7 +185,7 @@ impl Decl {
     /// Is this a section?
     pub fn is_section(&self) -> bool {
         match *self {
-            Decl::Artifact(ADecl::DebugSection { .. }) => true,
+            Decl::Defined(DefinedDecl::DebugSection { .. }) => true,
             _ => false,
         }
     }
@@ -242,7 +242,7 @@ impl FunctionDecl {
 
 impl Into<Decl> for FunctionDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::Function {
+        Decl::Defined(DefinedDecl::Function {
             global: self.global,
         })
     }
@@ -283,7 +283,7 @@ impl DataDecl {
 
 impl Into<Decl> for DataDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::Data {
+        Decl::Defined(DefinedDecl::Data {
             global: self.global,
             writable: self.writable,
         })
@@ -313,7 +313,7 @@ impl CStringDecl {
 
 impl Into<Decl> for CStringDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::CString {
+        Decl::Defined(DefinedDecl::CString {
             global: self.global,
         })
     }
@@ -329,6 +329,6 @@ impl Default for DebugSectionDecl {
 
 impl Into<Decl> for DebugSectionDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::DebugSection)
+        Decl::Defined(DefinedDecl::DebugSection)
     }
 }
