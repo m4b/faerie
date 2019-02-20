@@ -241,10 +241,10 @@ impl Artifact {
     }
     /// Declare and define a new symbolic reference with the given `decl` and given `definition`.
     /// This is sugar for `declare` and then `define`
-    pub fn declare_with<T: AsRef<str>>(
+    pub fn declare_with<T: AsRef<str>, D: Into<Decl>>(
         &mut self,
         name: T,
-        decl: Decl,
+        decl: D,
         definition: Vec<u8>,
     ) -> Result<(), Error> {
         self.declare(name.as_ref(), decl)?;
