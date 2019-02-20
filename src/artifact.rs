@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::{Decl, ADecl, ImportKind};
+pub use decl::{ADecl, Decl, ImportKind};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -52,19 +52,9 @@ pub enum ArtifactError {
     DuplicateDefinition(String),
 }
 
-/// The properties associated with a symbolic reference
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct Prop {
-    pub global: bool,
-    pub function: bool,
-    pub writable: bool,
-    pub cstring: bool,
-    pub section: bool,
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
-    prop: Prop,
+    adecl: ADecl,
     name: StringID,
     data: Data,
 }
@@ -111,7 +101,7 @@ pub struct LinkAndDecl<'a> {
 pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
-    pub prop: &'a Prop,
+    pub adecl: &'a ADecl,
 }
 
 impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
@@ -121,7 +111,7 @@ impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definitio
                 .resolve(def.name)
                 .expect("internal definition to have name"),
             data: &def.data,
-            prop: &def.prop,
+            adecl: &def.adecl,
         }
     }
 }
@@ -334,60 +324,32 @@ impl Artifact {
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
-                    return Err(ArtifactError::DuplicateDefinition(
+                    Err(ArtifactError::DuplicateDefinition(
                         name.as_ref().to_string(),
-                    ));
+                    ))?;
                 }
-                let prop = if let Decl::Artifact(adecl) = stype.decl {
-                    match adecl {
-                        ADecl::CString { global } => Prop {
-                            global,
-                            function: false,
-                            writable: false,
-                            cstring: true,
-                            section: false,
-                        },
-                        ADecl::Data { global, writable } => Prop {
-                            global,
-                            function: false,
-                            writable,
-                            cstring: false,
-                            section: false,
-                        },
-                        ADecl::Function { global } => Prop {
-                            global,
-                            function: true,
-                            writable: false,
-                            cstring: false,
-                            section: false,
-                        },
-                        ADecl::DebugSection { .. } => Prop {
-                            global: false,
-                            function: false,
-                            writable: false,
-                            cstring: false,
-                            section: true,
-                        },
+                let adecl = match stype.decl {
+                    Decl::Artifact(adecl) => adecl,
+                    Decl::Import(_) => {
+                        Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
                     }
-                } else {
-                    return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into());
                 };
-                if prop.global {
+                if adecl.is_global() {
                     self.nonlocal_definitions.insert(InternalDefinition {
                         name: decl_name,
                         data,
-                        prop,
+                        adecl,
                     });
                 } else {
                     self.local_definitions.insert(InternalDefinition {
                         name: decl_name,
                         data,
-                        prop,
+                        adecl,
                     });
                 }
                 stype.define();
             }
-            None => return Err(ArtifactError::Undeclared(name.as_ref().to_string())),
+            None => Err(ArtifactError::Undeclared(name.as_ref().to_string()))?,
         }
         Ok(())
     }
