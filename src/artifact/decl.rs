@@ -1,72 +1,39 @@
 use crate::artifact::ArtifactError;
 use failure::Error;
 
-/// The kind of declaration this is
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Decl {
-    Import(ImportKind),
-    Artifact(ADecl),
-}
-
-/// The kind of import this is - either a function, or a copy relocation of data from a shared library
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ImportKind {
-    /// A function
-    Function,
-    /// An imported piece of data
-    Data,
-}
-
-impl ImportKind {
-    pub fn from_decl(decl: &Decl) -> Option<Self> {
-        match decl {
-            Decl::Import(ik) => Some(*ik),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ADecl {
     /// A function defined in this artifact
-    Function { global: bool },
+    Function(FunctionDecl),
     /// A data object defined in this artifact
-    Data { global: bool, writable: bool },
+    Data(DataDecl),
     /// A null-terminated string object defined in this artifact
-    CString { global: bool },
+    CString(CStringDecl),
     /// A DWARF debug section defined in this artifact
-    DebugSection,
+    DebugSection(DebugSectionDecl),
 }
 
-impl ADecl {
+impl Decl {
     /// Accessor to determine whether scope is global
     pub fn is_global(&self) -> bool {
         match self {
-            ADecl::Function { global, .. } => *global,
-            ADecl::Data { global, .. } => *global,
-            ADecl::CString { global, .. } => *global,
-            ADecl::DebugSection { .. } => false,
+            Decl::Function(f) => f.is_global(),
+            Decl::Data(d) => d.is_global(),
+            Decl::CString(cs) => cs.is_global(),
+            Decl::DebugSection(ds) => ds.is_global(),
         }
     }
 
     /// Accessor to determine whether contents are writable
     pub fn is_writable(&self) -> bool {
         match self {
-            ADecl::Data { writable, .. } => *writable,
-            ADecl::Function { .. } | ADecl::CString { .. } | ADecl::DebugSection { .. } => false,
+            Decl::Data(d) => d.is_writable(),
+            Decl::Function { .. } | Decl::CString { .. } | Decl::DebugSection { .. } => false,
         }
     }
 }
 
 impl Decl {
-    /// An import of a function/routine defined in a shared library
-    pub fn function_import() -> FunctionImportDecl {
-        FunctionImportDecl::default()
-    }
-    /// A GOT-based import of data defined in a shared library
-    pub fn data_import() -> DataImportDecl {
-        DataImportDecl::default()
-    }
     /// A function defined in this artifact
     pub fn function() -> FunctionDecl {
         FunctionDecl::default()
@@ -83,7 +50,7 @@ impl Decl {
     pub fn debug_section() -> DebugSectionDecl {
         DebugSectionDecl::default()
     }
-
+/* XXX this has to move if imports are a separate thing
     /// If it is compatible, absorb the new declaration (`other`) into the old (`self`); otherwise returns an error.
     ///
     /// The rule here is "C-ish", but essentially:
@@ -103,7 +70,7 @@ impl Decl {
             Decl::Import(ImportKind::Data) => {
                 match other {
                     // data imports can be upgraded to any kind of data declaration
-                    Decl::Artifact(ADecl::Data { .. }) => {
+                    Decl::Artifact(Decl::Data { .. }) => {
                         *self = other;
                         Ok(())
                     }
@@ -175,50 +142,18 @@ impl Decl {
             }
         }
     }
-    /// Is this an import (function or data) from a shared library?
-    pub fn is_import(&self) -> bool {
-        match *self {
-            Decl::Import(_) => true,
-            _ => false,
-        }
-    }
+*/
     /// Is this a section?
     pub fn is_section(&self) -> bool {
         match *self {
-            Decl::Artifact(ADecl::DebugSection { .. }) => true,
+            Decl::DebugSection { .. } => true,
             _ => false,
         }
     }
 }
 
-pub struct FunctionImportDecl {}
 
-impl Default for FunctionImportDecl {
-    fn default() -> Self {
-        FunctionImportDecl {}
-    }
-}
-
-impl Into<Decl> for FunctionImportDecl {
-    fn into(self) -> Decl {
-        Decl::Import(ImportKind::Function)
-    }
-}
-
-pub struct DataImportDecl {}
-
-impl Default for DataImportDecl {
-    fn default() -> Self {
-        DataImportDecl {}
-    }
-}
-
-impl Into<Decl> for DataImportDecl {
-    fn into(self) -> Decl {
-        Decl::Import(ImportKind::Data)
-    }
-}
-
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FunctionDecl {
     global: bool,
 }
@@ -238,16 +173,18 @@ impl FunctionDecl {
         self.global = false;
         self
     }
+    pub fn is_global(&self) -> bool {
+        self.global
+    }
 }
 
 impl Into<Decl> for FunctionDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::Function {
-            global: self.global,
-        })
+        Decl::Function(self)
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DataDecl {
     global: bool,
     writable: bool,
@@ -271,6 +208,9 @@ impl DataDecl {
         self.global = false;
         self
     }
+    pub fn is_global(&self) -> bool {
+        self.global
+    }
     pub fn writable(mut self) -> Self {
         self.writable = true;
         self
@@ -279,17 +219,18 @@ impl DataDecl {
         self.writable = false;
         self
     }
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
 }
 
 impl Into<Decl> for DataDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::Data {
-            global: self.global,
-            writable: self.writable,
-        })
+        Decl::Data(self)
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CStringDecl {
     global: bool,
 }
@@ -309,17 +250,25 @@ impl CStringDecl {
         self.global = false;
         self
     }
+    pub fn is_global(&self) -> bool {
+        self.global
+    }
 }
 
 impl Into<Decl> for CStringDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::CString {
-            global: self.global,
-        })
+        Decl::CString(self)
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DebugSectionDecl {}
+
+impl DebugSectionDecl {
+    pub fn is_global(&self) -> bool {
+        false
+    }
+}
 
 impl Default for DebugSectionDecl {
     fn default() -> Self {
@@ -329,6 +278,6 @@ impl Default for DebugSectionDecl {
 
 impl Into<Decl> for DebugSectionDecl {
     fn into(self) -> Decl {
-        Decl::Artifact(ADecl::DebugSection)
+        Decl::DebugSection(self)
     }
 }

@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    artifact::{self, ADecl, Artifact, Decl, ImportKind, LinkAndDecl, Reloc},
+    artifact::{self, Decl, Artifact, Decl, ImportKind, LinkAndDecl, Reloc},
     target::make_ctx,
     Ctx,
 };
@@ -443,13 +443,13 @@ impl<'a> Elf<'a> {
             }
         }
     }
-    pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::ADecl) {
+    pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::Decl) {
         // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
         if !decl.is_global() {
             self.nlocals += 1;
         }
         // FIXME: this is kind of hacky?
-        let segment_name = if let ADecl::Function { .. } = decl {
+        let segment_name = if let Decl::Function { .. } = decl {
             "text"
         } else {
             // we'd add ro here once the prop supports that
@@ -463,8 +463,8 @@ impl<'a> Elf<'a> {
         // FIXME: probably add padding alignment
         let section = {
             let stype = match decl {
-                ADecl::Function { .. } => SectionType::Bits,
-                ADecl::CString { .. } => SectionType::String,
+                Decl::Function { .. } => SectionType::Bits,
+                Decl::CString { .. } => SectionType::String,
                 _ => SectionType::Data,
             };
 
@@ -474,7 +474,7 @@ impl<'a> Elf<'a> {
                 .writable(decl.is_writable());
 
             // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
-            if let ADecl::Function { .. } = decl {
+            if let Decl::Function { .. } = decl {
                 tmp.exec()
             } else {
                 tmp
@@ -489,7 +489,7 @@ impl<'a> Elf<'a> {
             idx, offset, self.sizeof_strtab
         );
         // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if let ADecl::Function { .. } = decl {
+        let mut symbol = SymbolBuilder::new(if let Decl::Function { .. } = decl {
             SymbolType::Function
         } else {
             SymbolType::Object
@@ -502,7 +502,7 @@ impl<'a> Elf<'a> {
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
     }
-    pub fn add_section(&mut self, name: &str, data: &'a [u8], _decl: &artifact::ADecl) {
+    pub fn add_section(&mut self, name: &str, data: &'a [u8], _decl: &artifact::Decl) {
         let stype = if name == ".debug_str" || name == ".debug_line_str" {
             SectionType::String
         } else {
@@ -599,20 +599,20 @@ impl<'a> Elf<'a> {
         };
         let (reloc, addend) = match l.reloc {
             Reloc::Auto => {
-                match *l.from.decl {
-                    Decl::Artifact(ADecl::Function { .. }) => {
-                        match *l.to.decl {
+                match *l.from.type_ {
+                    BindingType::Decl(Decl::Function { .. }) => {
+                        match *l.to.type_ {
                             // NB: this now forces _all_ function references, whether local or not, through the PLT
                             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                            Decl::Artifact(ADecl::Function { .. })
-                            | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
-                            Decl::Artifact(ADecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
-                            Decl::Artifact(ADecl::CString { .. }) => (reloc::R_X86_64_PC32, -4),
-                            Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
+                            BindingType::Decl(Decl::Function { .. })
+                            | BindingTyie::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
+                             BindingTyie::Artifact(Decl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
+                             BindingTyie::Artifact(Decl::CString { .. }) => (reloc::R_X86_64_PC32, -4),
+                             BindingTyie::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }
                     }
-                    Decl::Artifact(ADecl::Data { .. }) => {
+                    BindingType::Decl(Decl::Data { .. }) => {
                         if self.ctx.is_big() {
                             // Select an absolute relocation that is the size of a pointer.
                             (reloc::R_X86_64_64, 0)
@@ -855,7 +855,7 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        if let ADecl::DebugSection = def.adecl {
+        if let Decl::DebugSection = def.adecl {
             elf.add_section(def.name, def.data, def.adecl);
         } else {
             elf.add_definition(def.name, def.data, def.adecl);

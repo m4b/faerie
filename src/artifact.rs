@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::{ADecl, Decl, ImportKind};
+pub use decl::Decl;
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -54,7 +54,7 @@ pub enum ArtifactError {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
-    adecl: ADecl,
+    decl: Decl,
     name: StringID,
     data: Data,
 }
@@ -80,11 +80,26 @@ impl InternalDecl {
     }
 }
 
+/// The kind of import this is - either a function, or a copy relocation of data from a shared library
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImportKind {
+    /// A function
+    Function,
+    /// An imported piece of data
+    Data,
+}
+
+#[derive(Debug)]
+pub enum BindingType<'a> {
+    Decl(&'a Decl),
+    Import(&'a ImportKind),
+}
+
 /// A binding of a raw `name` to its declaration, `decl`
 #[derive(Debug)]
 pub struct Binding<'a> {
     pub name: &'a str,
-    pub decl: &'a Decl,
+    pub type_: BindingType<'a>,
 }
 
 /// A relocation binding one declaration to another
@@ -101,7 +116,7 @@ pub struct LinkAndDecl<'a> {
 pub(crate) struct Definition<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
-    pub adecl: &'a ADecl,
+    pub decl: &'a Decl,
 }
 
 impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
@@ -111,7 +126,7 @@ impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definitio
                 .resolve(def.name)
                 .expect("internal definition to have name"),
             data: &def.data,
-            adecl: &def.adecl,
+            decl: &def.decl,
         }
     }
 }
@@ -169,8 +184,7 @@ pub struct Artifact {
     pub target: Triple,
     /// Whether this is a static library or not
     pub is_library: bool,
-    // will keep this for now; may be useful to pre-partition code and data vectors, not sure
-    imports: Vec<(StringID, ImportKind)>,
+    imports: IndexMap<StringID, ImportKind>,
     links: Vec<Relocation>,
     declarations: IndexMap<StringID, InternalDecl>,
     local_definitions: BTreeSet<InternalDefinition>,
@@ -183,7 +197,7 @@ impl Artifact {
     /// Create a new binary Artifact, with `target` and optional `name`
     pub fn new(target: Triple, name: String) -> Self {
         Artifact {
-            imports: Vec::new(),
+            imports: IndexMap::new(),
             links: Vec::new(),
             name,
             target,
@@ -194,12 +208,29 @@ impl Artifact {
             strings: DefaultStringInterner::default(),
         }
     }
+    pub(crate) fn get_binding(&self, sid: StringID) -> Option<Binding> {
+        if let Some(d) = self.declarations.get(&sid) {
+            match d.decl {
+                Decl::Import(_) => panic!("this case is going away"), // XXX
+                Decl::Artifact(decl) =>  {
+                    Some(Binding {
+                        name: self.strings.resolve(sid).expect("have string for decl"),
+                        type_: BindingType::Decl(&decl),
+                    })
+                }
+            }
+        } else {
+            // TODO search through imports here
+            unimplemented!()
+        }
+    }
+
     /// Get an iterator over this artifact's imports
     pub fn imports<'a>(&'a self) -> Box<Iterator<Item = (&'a str, &'a ImportKind)> + 'a> {
         Box::new(
             self.imports
                 .iter()
-                .map(move |&(id, ref kind)| (self.strings.resolve(id).unwrap(), kind)),
+                .map(move |(id, kind)| (self.strings.resolve(*id).unwrap(), kind)),
         )
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
@@ -215,26 +246,14 @@ impl Artifact {
         Box::new(
             self.links
                 .iter()
-                .map(move |&(ref from, ref to, ref at, ref reloc)| {
-                    // FIXME: I think its safe to unwrap since the links are only ever constructed by us and we
-                    // ensure it has a declaration
-                    let (ref from_decl, ref to_decl) = (
-                        self.declarations.get(from).expect("declaration present"),
-                        self.declarations.get(to).unwrap(),
-                    );
-                    let from = Binding {
-                        name: self.strings.resolve(*from).expect("from link"),
-                        decl: &from_decl.decl,
-                    };
-                    let to = Binding {
-                        name: self.strings.resolve(*to).expect("to link"),
-                        decl: &to_decl.decl,
-                    };
+                .map(move |&(from, to, at, reloc)| {
+                    let from = self.get_binding(from).expect("");
+                    let to = self.get_binding(to).expect("");
                     LinkAndDecl {
                         from,
                         to,
-                        at: *at,
-                        reloc: *reloc,
+                        at: at,
+                        reloc: reloc,
                     }
                 }),
         )
@@ -271,7 +290,7 @@ impl Artifact {
                 // we have to check because otherwise duplicate imports cause an error
                 // FIXME: ditto fixme, below, use orderset
                 let mut present = false;
-                for &(ref name, _) in self.imports.iter() {
+                for (name, _) in self.imports.iter() {
                     if *name == decl_name {
                         present = true;
                     }
@@ -279,7 +298,7 @@ impl Artifact {
                 if !present {
                     let kind = ImportKind::from_decl(&new_idecl.decl)
                         .expect("can convert from explicitly matched decls to importkind");
-                    self.imports.push((decl_name, kind));
+                    self.imports.insert(decl_name, kind);
                 }
                 Ok(())
             }
@@ -287,14 +306,14 @@ impl Artifact {
             _ if previous_was_import => {
                 let mut index = None;
                 // FIXME: do binary search or make imports an indexmap
-                for (i, &(ref name, _)) in self.imports.iter().enumerate() {
+                for (i, (name, _)) in self.imports.iter().enumerate() {
                     if *name == decl_name {
                         index = Some(i);
                     }
                 }
                 let _ = self
                     .imports
-                    .swap_remove(index.expect("previous import was not in the imports array"));
+                    .swap_remove(&index.expect("previous import was not in the imports array"));
                 Ok(())
             }
             _ => Ok(()),
@@ -314,7 +333,7 @@ impl Artifact {
     /// **NB**: If you attempt to define an import, this will return an error.
     /// If you attempt to define something which has not been declared, this will return an error.
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
-        let decl_name = self.strings.get_or_intern(name.as_ref());
+        let decl_name = self.strings.get(name.as_ref()); // XXX fixme
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
