@@ -1,6 +1,6 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{DefinedDecl, Decl, Definition, ImportKind, Reloc};
+use crate::artifact::{Decl, DefinedDecl, Definition, ImportKind, Reloc};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
@@ -803,12 +803,15 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                         Decl::Import(ImportKind::Function { .. }),
                     ) => (true, X86_64_RELOC_UNSIGNED),
                     // anything else is just a regular relocation/callq
-                    (_, Decl::Defined(DefinedDecl::Function { .. })) => (false, X86_64_RELOC_BRANCH),
+                    (_, Decl::Defined(DefinedDecl::Function { .. })) => {
+                        (false, X86_64_RELOC_BRANCH)
+                    }
                     // we are a relocation in the data section to another object
                     // in the data section, e.g., a static reference
-                    (Decl::Defined(DefinedDecl::Data { .. }), Decl::Defined(DefinedDecl::Data { .. })) => {
-                        (true, X86_64_RELOC_UNSIGNED)
-                    }
+                    (
+                        Decl::Defined(DefinedDecl::Data { .. }),
+                        Decl::Defined(DefinedDecl::Data { .. }),
+                    ) => (true, X86_64_RELOC_UNSIGNED),
                     (_, Decl::Defined(DefinedDecl::Data { .. })) => (false, X86_64_RELOC_SIGNED),
                     // TODO: we will also need to specify relocations from Data to Cstrings, e.g., char * STR = "a global static string";
                     (_, Decl::Defined(DefinedDecl::CString { .. })) => (false, X86_64_RELOC_SIGNED),

@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    artifact::{self, DefinedDecl, Artifact, Decl, ImportKind, LinkAndDecl, Reloc},
+    artifact::{self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc},
     target::make_ctx,
     Ctx,
 };
@@ -190,8 +190,8 @@ impl SectionBuilder {
         }
     }
     /// Make this section executable
-    pub fn exec(mut self) -> Self {
-        self.exec = true;
+    pub fn exec(mut self, executable: bool) -> Self {
+        self.exec = executable;
         self
     }
     /// Make this section allocatable
@@ -468,17 +468,11 @@ impl<'a> Elf<'a> {
                 _ => SectionType::Data,
             };
 
-            let tmp = SectionBuilder::new(size as u64)
+            SectionBuilder::new(size as u64)
                 .section_type(stype)
                 .alloc()
-                .writable(decl.is_writable());
-
-            // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
-            if let DefinedDecl::Function { .. } = decl {
-                tmp.exec()
-            } else {
-                tmp
-            }
+                .writable(decl.is_writable())
+                .exec(decl.is_function())
         };
         let shndx = self.add_progbits(section_name, section, data);
 
@@ -607,7 +601,9 @@ impl<'a> Elf<'a> {
                             Decl::Defined(DefinedDecl::Function { .. })
                             | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
                             Decl::Defined(DefinedDecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
-                            Decl::Defined(DefinedDecl::CString { .. }) => (reloc::R_X86_64_PC32, -4),
+                            Decl::Defined(DefinedDecl::CString { .. }) => {
+                                (reloc::R_X86_64_PC32, -4)
+                            }
                             Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }

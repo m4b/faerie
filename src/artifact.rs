@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::{DefinedDecl, Decl, ImportKind};
+pub use decl::{Decl, DefinedDecl, ImportKind};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;

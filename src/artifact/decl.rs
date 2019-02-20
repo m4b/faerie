@@ -39,6 +39,38 @@ pub enum DefinedDecl {
 }
 
 impl DefinedDecl {
+    /// Accessor to determine whether variant is Function
+    pub fn is_function(&self) -> bool {
+        match self {
+            DefinedDecl::Function { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Accessor to determine whether variant is Data
+    pub fn is_data(&self) -> bool {
+        match self {
+            DefinedDecl::Data { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Accessor to determine whether variant is CString
+    pub fn is_cstring(&self) -> bool {
+        match self {
+            DefinedDecl::CString { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Accessor to determine whether variant is DebugSection
+    pub fn is_debug_section(&self) -> bool {
+        match self {
+            DefinedDecl::DebugSection { .. } => true,
+            _ => false,
+        }
+    }
+
     /// Accessor to determine whether scope is global
     pub fn is_global(&self) -> bool {
         match self {
@@ -53,7 +85,9 @@ impl DefinedDecl {
     pub fn is_writable(&self) -> bool {
         match self {
             DefinedDecl::Data { writable, .. } => *writable,
-            DefinedDecl::Function { .. } | DefinedDecl::CString { .. } | DefinedDecl::DebugSection { .. } => false,
+            DefinedDecl::Function { .. }
+            | DefinedDecl::CString { .. }
+            | DefinedDecl::DebugSection { .. } => false,
         }
     }
 }
