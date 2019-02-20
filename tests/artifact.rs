@@ -11,68 +11,40 @@ use std::str::FromStr;
 fn duplicate_declarations_are_ok() {
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
 
-    obj.declare("str.0", faerie::Decl::DataImport {})
+    obj.declare("str.0", faerie::Decl::data_import())
         .expect("initial declaration");
 
-    obj.declare(
-        "str.0",
-        faerie::Decl::Data {
-            global: false,
-            writable: false,
-        },
-    )
-    .expect("declare should be compatible");
+    obj.declare("str.0", faerie::Decl::data().local().read_only())
+        .expect("declare should be compatible");
 
     obj.define("str.0", b"hello world\0".to_vec())
         .expect("define");
 
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
-    obj.declarations(
-        vec![
-            ("str.0", faerie::Decl::DataImport),
-            (
-                "str.0",
-                faerie::Decl::Data {
-                    global: true,
-                    writable: false,
-                },
-            ),
-            ("str.0", faerie::Decl::DataImport),
-            ("str.0", faerie::Decl::DataImport),
-            (
-                "str.0",
-                faerie::Decl::Data {
-                    global: true,
-                    writable: false,
-                },
-            ),
-            ("f", faerie::Decl::FunctionImport),
-            ("f", faerie::Decl::Function { global: true }),
-            ("f", faerie::Decl::FunctionImport),
-            ("f", faerie::Decl::FunctionImport),
-            ("f", faerie::Decl::Function { global: true }),
-        ]
-        .into_iter(),
-    )
-    .expect("multiple declarations are ok");
+    let decls = vec![
+        ("str.0", faerie::Decl::data_import().into()),
+        ("str.0", faerie::Decl::data().global().read_only().into()),
+        ("str.0", faerie::Decl::data_import().into()),
+        ("str.0", faerie::Decl::data_import().into()),
+        ("str.0", faerie::Decl::data().global().read_only().into()),
+        ("f", faerie::Decl::function_import().into()),
+        ("f", faerie::Decl::function().global().into()),
+        ("f", faerie::Decl::function_import().into()),
+        ("f", faerie::Decl::function_import().into()),
+        ("f", faerie::Decl::function().global().into()),
+    ];
+    obj.declarations(decls.into_iter())
+        .expect("multiple declarations are ok");
 }
 
 #[test]
 fn multiple_different_declarations_are_not_ok() {
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
 
-    obj.declare("f", faerie::Decl::FunctionImport {})
+    obj.declare("f", faerie::Decl::function_import())
         .expect("initial declaration");
 
-    assert!(obj
-        .declare(
-            "f",
-            faerie::Decl::Data {
-                global: false,
-                writable: false,
-            },
-        )
-        .is_err());
+    assert!(obj.declare("f", faerie::Decl::data(),).is_err());
 }
 
 #[test]
@@ -81,11 +53,11 @@ fn multiple_different_conflicting_declarations_are_not_ok_and_do_not_overwrite()
     assert!(obj
         .declarations(
             vec![
-                ("f", faerie::Decl::FunctionImport),
-                ("f", faerie::Decl::Function { global: true }),
-                ("f", faerie::Decl::FunctionImport),
-                ("f", faerie::Decl::FunctionImport),
-                ("f", faerie::Decl::Function { global: false }),
+                ("f", faerie::Decl::function_import().into()),
+                ("f", faerie::Decl::function().global().into()),
+                ("f", faerie::Decl::function_import().into()),
+                ("f", faerie::Decl::function_import().into()),
+                ("f", faerie::Decl::function().into()),
             ]
             .into_iter(),
         )
@@ -97,9 +69,9 @@ fn import_declarations_fill_imports_correctly() {
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
     obj.declarations(
         vec![
-            ("f", faerie::Decl::FunctionImport),
-            ("f", faerie::Decl::FunctionImport),
-            ("d", faerie::Decl::DataImport),
+            ("f", faerie::Decl::function_import().into()),
+            ("f", faerie::Decl::function_import().into()),
+            ("d", faerie::Decl::data_import().into()),
         ]
         .into_iter(),
     )
@@ -113,11 +85,11 @@ fn import_declarations_work_with_redeclarations() {
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
     obj.declarations(
         vec![
-            ("f", faerie::Decl::FunctionImport),
-            ("d", faerie::Decl::DataImport),
-            ("d", faerie::Decl::DataImport),
-            ("f", faerie::Decl::Function { global: true }),
-            ("f", faerie::Decl::FunctionImport),
+            ("f", faerie::Decl::function_import().into()),
+            ("d", faerie::Decl::data_import().into()),
+            ("d", faerie::Decl::data_import().into()),
+            ("f", faerie::Decl::function().global().into()),
+            ("f", faerie::Decl::function_import().into()),
         ]
         .into_iter(),
     )
@@ -140,8 +112,8 @@ fn reject_duplicate_definitions() {
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
     obj.declarations(
         vec![
-            ("f", faerie::Decl::Function { global: true }),
-            ("g", faerie::Decl::Function { global: false }),
+            ("f", faerie::Decl::function().global().into()),
+            ("g", faerie::Decl::function().into()),
         ]
         .into_iter(),
     )
@@ -162,8 +134,8 @@ fn undefined_symbols() {
     let mut obj = Artifact::new(triple!("x86_64"), "t.o".into());
     obj.declarations(
         vec![
-            ("f", faerie::Decl::Function { global: true }),
-            ("g", faerie::Decl::Function { global: false }),
+            ("f", faerie::Decl::function().global().into()),
+            ("g", faerie::Decl::function().into()),
         ]
         .into_iter(),
     )
