@@ -170,10 +170,7 @@ pub struct Artifact {
     /// Whether this is a static library or not
     pub is_library: bool,
     // will keep this for now; may be useful to pre-partition code and data vectors, not sure
-    code: Vec<(StringID, Data)>,
-    data: Vec<(StringID, Data)>,
     imports: Vec<(StringID, ImportKind)>,
-    import_links: Vec<Relocation>,
     links: Vec<Relocation>,
     declarations: IndexMap<StringID, InternalDecl>,
     local_definitions: BTreeSet<InternalDefinition>,
@@ -186,10 +183,7 @@ impl Artifact {
     /// Create a new binary Artifact, with `target` and optional `name`
     pub fn new(target: Triple, name: String) -> Self {
         Artifact {
-            code: Vec::new(),
-            data: Vec::new(),
             imports: Vec::new(),
-            import_links: Vec::new(),
             links: Vec::new(),
             name,
             target,
