@@ -2,14 +2,14 @@ use crate::artifact::ArtifactError;
 use failure::Error;
 
 /// The kind of declaration this is
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Decl {
     Import(ImportKind),
     Artifact(ADecl),
 }
 
 /// The kind of import this is - either a function, or a copy relocation of data from a shared library
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImportKind {
     /// A function
     Function,
@@ -26,7 +26,7 @@ impl ImportKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ADecl {
     /// A function defined in this artifact
     Function { global: bool },
@@ -36,6 +36,26 @@ pub enum ADecl {
     CString { global: bool },
     /// A DWARF debug section defined in this artifact
     DebugSection,
+}
+
+impl ADecl {
+    /// Accessor to determine whether scope is global
+    pub fn is_global(&self) -> bool {
+        match self {
+            ADecl::Function { global, .. } => *global,
+            ADecl::Data { global, .. } => *global,
+            ADecl::CString { global, .. } => *global,
+            ADecl::DebugSection { .. } => false,
+        }
+    }
+
+    /// Accessor to determine whether contents are writable
+    pub fn is_writable(&self) -> bool {
+        match self {
+            ADecl::Data { writable, .. } => *writable,
+            ADecl::Function { .. } | ADecl::CString { .. } | ADecl::DebugSection { .. } => false,
+        }
+    }
 }
 
 impl Decl {

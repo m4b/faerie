@@ -1,6 +1,6 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{Decl, ImportKind, ADecl, Definition, Reloc};
+use crate::artifact::{ADecl, Decl, Definition, ImportKind, Reloc};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
@@ -427,8 +427,9 @@ impl SegmentBuilder {
         let mut local_size = 0;
         let mut segment_relative_offset = 0;
         for def in definitions {
-            // FIXME: debug sections aren't implemented yet
-            assert!(!def.prop.section);
+            if let ADecl::DebugSection { .. } = def.adecl {
+                unimplemented!("debug sections for mach backend")
+            }
             local_size += def.data.len() as u64;
             symtab.insert(
                 def.name,
@@ -436,7 +437,7 @@ impl SegmentBuilder {
                     section,
                     segment_relative_offset,
                     absolute_offset: *symbol_offset,
-                    global: def.prop.global,
+                    global: def.adecl.is_global(),
                 },
             );
             *symbol_offset += def.data.len() as u64;
@@ -569,14 +570,19 @@ impl<'a> Mach<'a> {
         let (mut code, mut data, mut cstrings, mut debug) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for def in artifact.definitions() {
-            if def.prop.section {
-                debug.push(def);
-            } else if def.prop.function {
-                code.push(def);
-            } else if def.prop.cstring {
-                cstrings.push(def)
-            } else {
-                data.push(def);
+            match def.adecl {
+                ADecl::Function { .. } => {
+                    code.push(def);
+                }
+                ADecl::Data { .. } => {
+                    data.push(def);
+                }
+                ADecl::CString { .. } => {
+                    cstrings.push(def);
+                }
+                ADecl::DebugSection { .. } => {
+                    debug.push(def);
+                }
             }
         }
 

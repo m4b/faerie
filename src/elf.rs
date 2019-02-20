@@ -443,13 +443,13 @@ impl<'a> Elf<'a> {
             }
         }
     }
-    pub fn add_definition(&mut self, name: &str, data: &'a [u8], prop: &artifact::Prop) {
+    pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::ADecl) {
         // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
-        if !prop.global {
+        if !decl.is_global() {
             self.nlocals += 1;
         }
         // FIXME: this is kind of hacky?
-        let segment_name = if prop.function {
+        let segment_name = if let ADecl::Function { .. } = decl {
             "text"
         } else {
             // we'd add ro here once the prop supports that
@@ -462,21 +462,19 @@ impl<'a> Elf<'a> {
         // now we build the section a la LLVM "function sections"
         // FIXME: probably add padding alignment
         let section = {
-            let stype = if prop.function {
-                SectionType::Bits
-            } else if prop.cstring {
-                SectionType::String
-            } else {
-                SectionType::Data
+            let stype = match decl {
+                ADecl::Function { .. } => SectionType::Bits,
+                ADecl::CString { .. } => SectionType::String,
+                _ => SectionType::Data,
             };
 
             let tmp = SectionBuilder::new(size as u64)
                 .section_type(stype)
                 .alloc()
-                .writable(prop.writable);
+                .writable(decl.is_writable());
 
             // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
-            if prop.function {
+            if let ADecl::Function { .. } = decl {
                 tmp.exec()
             } else {
                 tmp
@@ -491,20 +489,20 @@ impl<'a> Elf<'a> {
             idx, offset, self.sizeof_strtab
         );
         // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if prop.function {
+        let mut symbol = SymbolBuilder::new(if let ADecl::Function { .. } = decl {
             SymbolType::Function
         } else {
             SymbolType::Object
         })
         .size(size)
         .name_offset(offset)
-        .local(!prop.global)
+        .local(!decl.is_global())
         .create();
         symbol.st_shndx = shndx;
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
     }
-    pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
+    pub fn add_section(&mut self, name: &str, data: &'a [u8], _decl: &artifact::ADecl) {
         let stype = if name == ".debug_str" || name == ".debug_line_str" {
             SectionType::String
         } else {
@@ -606,9 +604,8 @@ impl<'a> Elf<'a> {
                         match *l.to.decl {
                             // NB: this now forces _all_ function references, whether local or not, through the PLT
                             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                            Decl::Artifact(ADecl::Function { .. }) | Decl::Import(ImportKind::Function) => {
-                                (reloc::R_X86_64_PLT32, -4)
-                            }
+                            Decl::Artifact(ADecl::Function { .. })
+                            | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
                             Decl::Artifact(ADecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
                             Decl::Artifact(ADecl::CString { .. }) => (reloc::R_X86_64_PC32, -4),
                             Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
@@ -858,10 +855,10 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        if def.prop.section {
-            elf.add_section(def.name, def.data, def.prop);
+        if let ADecl::DebugSection = def.adecl {
+            elf.add_section(def.name, def.data, def.adecl);
         } else {
-            elf.add_definition(def.name, def.data, def.prop);
+            elf.add_definition(def.name, def.data, def.adecl);
         }
     }
     for (ref import, ref kind) in artifact.imports() {
