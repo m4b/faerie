@@ -1,6 +1,6 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{Decl, DefinedDecl, Definition, ImportKind, Reloc};
+use crate::artifact::{DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
@@ -574,11 +574,12 @@ impl<'a> Mach<'a> {
                 DefinedDecl::Function { .. } => {
                     code.push(def);
                 }
-                DefinedDecl::Data { .. } => {
-                    data.push(def);
-                }
-                DefinedDecl::CString { .. } => {
-                    cstrings.push(def);
+                DefinedDecl::Data(d) => {
+                    if d.get_datatype() == DataType::String {
+                        cstrings.push(def);
+                    } else {
+                        data.push(def);
+                    }
                 }
                 DefinedDecl::DebugSection { .. } => {
                     debug.push(def);
@@ -813,8 +814,6 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                         Decl::Defined(DefinedDecl::Data { .. }),
                     ) => (true, X86_64_RELOC_UNSIGNED),
                     (_, Decl::Defined(DefinedDecl::Data { .. })) => (false, X86_64_RELOC_SIGNED),
-                    // TODO: we will also need to specify relocations from Data to Cstrings, e.g., char * STR = "a global static string";
-                    (_, Decl::Defined(DefinedDecl::CString { .. })) => (false, X86_64_RELOC_SIGNED),
                     (_, Decl::Import(ImportKind::Function)) => (false, X86_64_RELOC_BRANCH),
                     (_, Decl::Import(ImportKind::Data)) => (false, X86_64_RELOC_GOT_LOAD),
                 }

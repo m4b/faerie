@@ -61,8 +61,6 @@ pub enum DefinedDecl {
     Function(FunctionDecl),
     /// A data object defined in this artifact
     Data(DataDecl),
-    /// A null-terminated string object defined in this artifact
-    CString(CStringDecl),
     /// A DWARF debug section defined in this artifact
     DebugSection(DebugSectionDecl),
 }
@@ -84,14 +82,6 @@ impl DefinedDecl {
         }
     }
 
-    /// Accessor to determine whether variant is CString
-    pub fn is_cstring(&self) -> bool {
-        match self {
-            DefinedDecl::CString { .. } => true,
-            _ => false,
-        }
-    }
-
     /// Accessor to determine whether variant is DebugSection
     pub fn is_debug_section(&self) -> bool {
         match self {
@@ -105,7 +95,6 @@ impl DefinedDecl {
         match self {
             DefinedDecl::Function(a) => a.is_global(),
             DefinedDecl::Data(a) => a.is_global(),
-            DefinedDecl::CString(a) => a.is_global(),
             DefinedDecl::DebugSection(a) => a.is_global(),
         }
     }
@@ -114,7 +103,7 @@ impl DefinedDecl {
     pub fn is_writable(&self) -> bool {
         match self {
             DefinedDecl::Data(a) => a.is_writable(),
-            DefinedDecl::Function(_) | DefinedDecl::CString(_) | DefinedDecl::DebugSection(_) => {
+            DefinedDecl::Function(_) | DefinedDecl::DebugSection(_) => {
                 false
             }
         }
@@ -139,8 +128,8 @@ impl Decl {
         DataDecl::default()
     }
     /// A null-terminated string object defined in this artifact
-    pub fn cstring() -> CStringDecl {
-        CStringDecl::default()
+    pub fn cstring() -> DataDecl {
+        DataDecl::default().with_datatype(DataType::String)
     }
     /// A DWARF debug section defined in this artifact
     pub fn debug_section() -> DebugSectionDecl {
@@ -376,11 +365,21 @@ impl Into<Decl> for FunctionDecl {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Type of data declared
+pub enum DataType {
+    /// Ordinary raw bytes
+    Bytes,
+    /// 0-terminated ascii string
+    String,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for data declarations
 pub struct DataDecl {
     scope: Scope,
     visibility: Visibility,
     writable: bool,
+    datatype: DataType,
 }
 
 impl Default for DataDecl {
@@ -389,6 +388,7 @@ impl Default for DataDecl {
             scope: Scope::Local,
             visibility: Visibility::Default,
             writable: false,
+            datatype: DataType::Bytes,
         }
     }
 }
@@ -410,6 +410,20 @@ impl DataDecl {
     pub fn is_writable(&self) -> bool {
         self.writable
     }
+
+    /// Build datatype
+    pub fn with_datatype(mut self, datatype: DataType) -> Self {
+        self.datatype = datatype;
+        self
+    }
+    /// Set datatype
+    pub fn set_datatype(&mut self, datatype: DataType) {
+        self.datatype = datatype;
+    }
+    /// Get datatype
+    pub fn get_datatype(&self) -> DataType {
+        self.datatype
+    }
 }
 
 impl Into<Decl> for DataDecl {
@@ -418,32 +432,6 @@ impl Into<Decl> for DataDecl {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-/// Builder for a CString (0-terminated character sequence) declaration
-pub struct CStringDecl {
-    scope: Scope,
-    visibility: Visibility,
-}
-
-impl Default for CStringDecl {
-    fn default() -> Self {
-        CStringDecl {
-            scope: Scope::Local,
-            visibility: Visibility::Default,
-        }
-    }
-}
-
-impl CStringDecl {
-    scope_methods!();
-    visibility_methods!();
-}
-
-impl Into<Decl> for CStringDecl {
-    fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::CString(self))
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for a debug section declaration

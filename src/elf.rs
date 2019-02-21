@@ -7,7 +7,7 @@
 
 use crate::{
     artifact::{
-        self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope, Visibility,
+        self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope, Visibility, DataType
     },
     target::make_ctx,
     Ctx,
@@ -155,11 +155,6 @@ impl<'a> SymbolBuilder<'a> {
                 st_info |= scope_stb_flags(d.get_scope());
                 st_other |= vis_stother_flags(d.get_visibility());
             }
-            SymbolType::Decl(DefinedDecl::CString(d)) => {
-                st_info |= STT_OBJECT;
-                st_info |= scope_stb_flags(d.get_scope());
-                st_other |= vis_stother_flags(d.get_visibility());
-            }
             SymbolType::Import => {
                 st_info = STT_NOTYPE;
                 st_info |= STB_GLOBAL << 4;
@@ -195,6 +190,15 @@ enum SectionType {
     SymTab,
     Relocation,
     None,
+}
+
+impl SectionType {
+    pub fn from_datatype(datatype: DataType) -> Self {
+        match datatype {
+            DataType::Bytes => SectionType::Bits,
+            DataType::String => SectionType::String,
+        }
+    }
 }
 
 /// A builder for creating a 32/64 bit section
@@ -487,7 +491,6 @@ impl<'a> Elf<'a> {
                 if d.is_writable() { "data" } else { "rodata" },
                 name
             ),
-            DefinedDecl::CString(_) => format!(".rodata.{}", name),
             DefinedDecl::DebugSection(_) => name.to_owned(),
         };
 
@@ -498,14 +501,9 @@ impl<'a> Elf<'a> {
                 .writable(false)
                 .exec(true),
             DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
-                .section_type(SectionType::Data)
+                .section_type(SectionType::from_datatype(d.get_datatype()))
                 .alloc()
                 .writable(d.is_writable())
-                .exec(false),
-            DefinedDecl::CString(_) => SectionBuilder::new(def_size as u64)
-                .section_type(SectionType::String)
-                .alloc()
-                .writable(false)
                 .exec(false),
             DefinedDecl::DebugSection(_) => SectionBuilder::new(def_size as u64).section_type(
                 if name == ".debug_str" || name == ".debug_line_str" {
@@ -519,7 +517,7 @@ impl<'a> Elf<'a> {
         let shndx = self.add_progbits(section_name, section, data);
 
         match decl {
-            DefinedDecl::Function(_) | DefinedDecl::Data(_) | DefinedDecl::CString(_) => {
+            DefinedDecl::Function(_) | DefinedDecl::Data(_) => {
                 let (idx, offset) = self.new_string(name.to_string());
                 debug!(
                     "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
@@ -634,9 +632,6 @@ impl<'a> Elf<'a> {
                             Decl::Defined(DefinedDecl::Function { .. })
                             | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
                             Decl::Defined(DefinedDecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
-                            Decl::Defined(DefinedDecl::CString { .. }) => {
-                                (reloc::R_X86_64_PC32, -4)
-                            }
                             Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }
