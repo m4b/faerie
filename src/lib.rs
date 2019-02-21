@@ -19,7 +19,6 @@ mod elf;
 mod mach;
 mod target;
 
-
 pub mod artifact;
 pub use crate::artifact::{
     decl::{
