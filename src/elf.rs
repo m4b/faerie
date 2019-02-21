@@ -6,9 +6,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    artifact::{self, LinkAndDecl, Reloc},
+    artifact::{self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc},
     target::make_ctx,
-    Artifact, Ctx, Decl, ImportKind,
+    Ctx,
 };
 use failure::Error;
 use goblin;
@@ -190,8 +190,8 @@ impl SectionBuilder {
         }
     }
     /// Make this section executable
-    pub fn exec(mut self) -> Self {
-        self.exec = true;
+    pub fn exec(mut self, executable: bool) -> Self {
+        self.exec = executable;
         self
     }
     /// Make this section allocatable
@@ -443,13 +443,13 @@ impl<'a> Elf<'a> {
             }
         }
     }
-    pub fn add_definition(&mut self, name: &str, data: &'a [u8], prop: &artifact::Prop) {
+    pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::DefinedDecl) {
         // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
-        if !prop.global {
+        if !decl.is_global() {
             self.nlocals += 1;
         }
         // FIXME: this is kind of hacky?
-        let segment_name = if prop.function {
+        let segment_name = if let DefinedDecl::Function { .. } = decl {
             "text"
         } else {
             // we'd add ro here once the prop supports that
@@ -462,25 +462,17 @@ impl<'a> Elf<'a> {
         // now we build the section a la LLVM "function sections"
         // FIXME: probably add padding alignment
         let section = {
-            let stype = if prop.function {
-                SectionType::Bits
-            } else if prop.cstring {
-                SectionType::String
-            } else {
-                SectionType::Data
+            let stype = match decl {
+                DefinedDecl::Function { .. } => SectionType::Bits,
+                DefinedDecl::CString { .. } => SectionType::String,
+                _ => SectionType::Data,
             };
 
-            let tmp = SectionBuilder::new(size as u64)
+            SectionBuilder::new(size as u64)
                 .section_type(stype)
                 .alloc()
-                .writable(prop.writable);
-
-            // FIXME: I don't like this at all; can make exec() take bool but doesn't match other section properties
-            if prop.function {
-                tmp.exec()
-            } else {
-                tmp
-            }
+                .writable(decl.is_writable())
+                .exec(decl.is_function())
         };
         let shndx = self.add_progbits(section_name, section, data);
 
@@ -491,20 +483,20 @@ impl<'a> Elf<'a> {
             idx, offset, self.sizeof_strtab
         );
         // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if prop.function {
+        let mut symbol = SymbolBuilder::new(if let DefinedDecl::Function { .. } = decl {
             SymbolType::Function
         } else {
             SymbolType::Object
         })
         .size(size)
         .name_offset(offset)
-        .local(!prop.global)
+        .local(!decl.is_global())
         .create();
         symbol.st_shndx = shndx;
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
     }
-    pub fn add_section(&mut self, name: &str, data: &'a [u8], _prop: &artifact::Prop) {
+    pub fn add_section(&mut self, name: &str, data: &'a [u8], _decl: &artifact::DefinedDecl) {
         let stype = if name == ".debug_str" || name == ".debug_line_str" {
             SectionType::String
         } else {
@@ -602,20 +594,21 @@ impl<'a> Elf<'a> {
         let (reloc, addend) = match l.reloc {
             Reloc::Auto => {
                 match *l.from.decl {
-                    Decl::Function { .. } => {
+                    Decl::Defined(DefinedDecl::Function { .. }) => {
                         match *l.to.decl {
                             // NB: this now forces _all_ function references, whether local or not, through the PLT
                             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
-                            Decl::Function { .. } | Decl::FunctionImport => {
-                                (reloc::R_X86_64_PLT32, -4)
+                            Decl::Defined(DefinedDecl::Function { .. })
+                            | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
+                            Decl::Defined(DefinedDecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
+                            Decl::Defined(DefinedDecl::CString { .. }) => {
+                                (reloc::R_X86_64_PC32, -4)
                             }
-                            Decl::Data { .. } => (reloc::R_X86_64_PC32, -4),
-                            Decl::CString { .. } => (reloc::R_X86_64_PC32, -4),
-                            Decl::DataImport => (reloc::R_X86_64_GOTPCREL, -4),
+                            Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }
                     }
-                    Decl::Data { .. } => {
+                    Decl::Defined(DefinedDecl::Data { .. }) => {
                         if self.ctx.is_big() {
                             // Select an absolute relocation that is the size of a pointer.
                             (reloc::R_X86_64_64, 0)
@@ -636,15 +629,12 @@ impl<'a> Elf<'a> {
         let addend = i64::from(addend);
 
         let sym_idx = match *l.to.decl {
-            Decl::Function { .. }
-            | Decl::Data { .. }
-            | Decl::CString { .. }
-            | Decl::DebugSection { .. } => {
+            Decl::Defined(_) => {
                 // We don't emit symbols for null + strtab + symtab, and
                 // section symbols come after special symbols.
                 (to_shndx - 3) + self.special_symbols.len()
             }
-            Decl::FunctionImport | Decl::DataImport => to_idx,
+            Decl::Import(_) => to_idx,
         };
 
         let reloc = RelocationBuilder::new(reloc)
@@ -861,10 +851,10 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        if def.prop.section {
-            elf.add_section(def.name, def.data, def.prop);
+        if let DefinedDecl::DebugSection { .. } = def.decl {
+            elf.add_section(def.name, def.data, def.decl);
         } else {
-            elf.add_definition(def.name, def.data, def.prop);
+            elf.add_definition(def.name, def.data, def.decl);
         }
     }
     for (ref import, ref kind) in artifact.imports() {

@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::Decl;
+pub use decl::{Decl, DefinedDecl, ImportKind};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -24,9 +24,19 @@ pub enum Reloc {
     Auto,
     /// A raw relocation and its addend, to optionally override the "auto" relocation behavior of faerie.
     /// **NB**: This is implementation defined, and can break code invariants if used improperly, you have been warned.
-    Raw { reloc: u32, addend: i32 },
+    Raw {
+        /// Raw relocation, as an integer value to be encoded by the backend
+        reloc: u32,
+        /// Raw addend, significance depends on the raw relocation used
+        addend: i32,
+    },
     /// A relocation in a debug section.
-    Debug { size: u8, addend: i32 },
+    Debug {
+        /// Size (in bytes) of the pointer to be relocated
+        size: u8,
+        /// Addend for the relocation
+        addend: i32,
+    },
 }
 
 type StringID = usize;
@@ -36,10 +46,13 @@ type Relocation = (StringID, StringID, u64, Reloc);
 #[derive(Fail, Debug)]
 pub enum ArtifactError {
     #[fail(display = "Undeclared symbolic reference to: {}", _0)]
+    /// Undeclarated symbolic reference
     Undeclared(String),
     #[fail(display = "Attempt to define an undefined import: {}", _0)]
+    /// Attempt to define an undefined import
     ImportDefined(String),
     #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
+    /// Attempt to use a relocation inside an import
     RelocateImport(String),
     // FIXME: don't use debugging prints for decl formats
     #[fail(
@@ -47,43 +60,23 @@ pub enum ArtifactError {
         old, new
     )]
     /// An incompatble declaration occurred, please see the [absorb](enum.Decl.html#method.absorb) method on `Decl`
-    IncompatibleDeclaration { old: Decl, new: Decl },
+    IncompatibleDeclaration {
+        /// Previously provided declaration
+        old: Decl,
+        /// Declaration that caused this error
+        new: Decl,
+    },
     #[fail(display = "duplicate definition of symbol: {}", _0)]
+    /// A duplicate definition
     DuplicateDefinition(String),
-}
-
-///////////////////////////////////////////////
-// NOTE:
-// Good citizen, you are hereby forewarned:
-//
-// Do not change the ordering of any fields in Prop or InternalDefinition
-// because:
-// 1. BTreeSet depends on it
-// 2. Backends (e.g. ELF) rely on it to receive the definitions as locals first, etc.
-//
-// If it is changed, it must obey the invariant that:
-//   iteration via `definitions()` returns _local_ (i.e., non global) definitions first
-//   (the ordering of properties thereafter is not specified nor currently relevant)
-//   _and then_ global definitions
-///////////////////////////////////////////////
-/// The properties associated with a symbolic reference
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct Prop {
-    pub global: bool,
-    pub function: bool,
-    pub writable: bool,
-    pub cstring: bool,
-    pub section: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
-    prop: Prop,
+    decl: DefinedDecl,
     name: StringID,
     data: Data,
 }
-// end note
-///////////////////////////////////////////////
 
 /// A declaration, plus a flag to track whether we have a definition for it yet
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -109,25 +102,34 @@ impl InternalDecl {
 /// A binding of a raw `name` to its declaration, `decl`
 #[derive(Debug)]
 pub struct Binding<'a> {
+    /// Name of symbol
     pub name: &'a str,
+    /// Declaration of symbol
     pub decl: &'a Decl,
 }
 
 /// A relocation binding one declaration to another
 #[derive(Debug)]
 pub struct LinkAndDecl<'a> {
+    /// Relocation is inside this symbol
     pub from: Binding<'a>,
+    /// Targeting this symbol
     pub to: Binding<'a>,
+    /// Offset into `from`
     pub at: u64,
+    /// Type of relocation to use
     pub reloc: Reloc,
 }
 
 /// A definition of a symbol with its properties the various backends receive
 #[derive(Debug)]
 pub(crate) struct Definition<'a> {
+    /// Name of symbol
     pub name: &'a str,
+    /// Contents of definition
     pub data: &'a [u8],
-    pub prop: &'a Prop,
+    /// Declaration of symbol
+    pub decl: &'a DefinedDecl,
 }
 
 impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
@@ -137,7 +139,7 @@ impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definitio
                 .resolve(def.name)
                 .expect("internal definition to have name"),
             data: &def.data,
-            prop: &def.prop,
+            decl: &def.decl,
         }
     }
 }
@@ -150,25 +152,6 @@ pub struct Link<'a> {
     pub to: &'a str,
     /// The byte offset _relative_ to `from` where the relocation should be performed
     pub at: u64,
-}
-
-/// The kind of import this is - either a function, or a copy relocation of data from a shared library
-#[derive(Debug, Clone)]
-pub enum ImportKind {
-    /// A function
-    Function,
-    /// An imported piece of data
-    Data,
-}
-
-impl ImportKind {
-    fn from_decl(decl: &Decl) -> Option<Self> {
-        match decl {
-            &Decl::DataImport => Some(ImportKind::Data),
-            &Decl::FunctionImport => Some(ImportKind::Function),
-            _ => None,
-        }
-    }
 }
 
 /// Builder for creating an artifact
@@ -197,6 +180,7 @@ impl ArtifactBuilder {
         self.library = is_library;
         self
     }
+    /// Build into an Artifact
     pub fn finish(self) -> Artifact {
         let name = self.name.unwrap_or_else(|| "faerie.o".to_owned());
         let mut artifact = Artifact::new(self.target, name);
@@ -215,13 +199,11 @@ pub struct Artifact {
     /// Whether this is a static library or not
     pub is_library: bool,
     // will keep this for now; may be useful to pre-partition code and data vectors, not sure
-    code: Vec<(StringID, Data)>,
-    data: Vec<(StringID, Data)>,
     imports: Vec<(StringID, ImportKind)>,
-    import_links: Vec<Relocation>,
     links: Vec<Relocation>,
     declarations: IndexMap<StringID, InternalDecl>,
-    definitions: BTreeSet<InternalDefinition>,
+    local_definitions: BTreeSet<InternalDefinition>,
+    nonlocal_definitions: BTreeSet<InternalDefinition>,
     strings: DefaultStringInterner,
 }
 
@@ -230,16 +212,14 @@ impl Artifact {
     /// Create a new binary Artifact, with `target` and optional `name`
     pub fn new(target: Triple, name: String) -> Self {
         Artifact {
-            code: Vec::new(),
-            data: Vec::new(),
             imports: Vec::new(),
-            import_links: Vec::new(),
             links: Vec::new(),
             name,
             target,
             is_library: false,
             declarations: IndexMap::new(),
-            definitions: BTreeSet::new(),
+            local_definitions: BTreeSet::new(),
+            nonlocal_definitions: BTreeSet::new(),
             strings: DefaultStringInterner::default(),
         }
     }
@@ -253,8 +233,9 @@ impl Artifact {
     }
     pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
         Box::new(
-            self.definitions
+            self.local_definitions
                 .iter()
+                .chain(self.nonlocal_definitions.iter())
                 .map(move |int_def| Definition::from((int_def, &self.strings))),
         )
     }
@@ -289,10 +270,10 @@ impl Artifact {
     }
     /// Declare and define a new symbolic reference with the given `decl` and given `definition`.
     /// This is sugar for `declare` and then `define`
-    pub fn declare_with<T: AsRef<str>>(
+    pub fn declare_with<T: AsRef<str>, D: Into<Decl>>(
         &mut self,
         name: T,
-        decl: Decl,
+        decl: D,
         definition: Vec<u8>,
     ) -> Result<(), Error> {
         self.declare(name.as_ref(), decl)?;
@@ -315,7 +296,7 @@ impl Artifact {
             previous
         };
         match new_idecl.decl {
-            Decl::DataImport | Decl::FunctionImport => {
+            Decl::Import(_) => {
                 // we have to check because otherwise duplicate imports cause an error
                 // FIXME: ditto fixme, below, use orderset
                 let mut present = false;
@@ -366,65 +347,39 @@ impl Artifact {
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
-                    return Err(ArtifactError::DuplicateDefinition(
+                    Err(ArtifactError::DuplicateDefinition(
                         name.as_ref().to_string(),
-                    ));
+                    ))?;
                 }
-                let prop = match stype.decl {
-                    Decl::CString { global } => Prop {
-                        global,
-                        function: false,
-                        writable: false,
-                        cstring: true,
-                        section: false,
-                    },
-                    Decl::Data { global, writable } => Prop {
-                        global,
-                        function: false,
-                        writable,
-                        cstring: false,
-                        section: false,
-                    },
-                    Decl::Function { global } => Prop {
-                        global,
-                        function: true,
-                        writable: false,
-                        cstring: false,
-                        section: false,
-                    },
-                    Decl::DebugSection { .. } => Prop {
-                        global: false,
-                        function: false,
-                        writable: false,
-                        cstring: false,
-                        section: true,
-                    },
-                    _ if stype.decl.is_import() => {
-                        return Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into());
+                let decl = match stype.decl {
+                    Decl::Defined(decl) => decl,
+                    Decl::Import(_) => {
+                        Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
                     }
-                    _ => unimplemented!("New Decl variant added but not covered in define method"),
                 };
-                self.definitions.insert(InternalDefinition {
-                    name: decl_name,
-                    data,
-                    prop,
-                });
+                if decl.is_global() {
+                    self.nonlocal_definitions.insert(InternalDefinition {
+                        name: decl_name,
+                        data,
+                        decl,
+                    });
+                } else {
+                    self.local_definitions.insert(InternalDefinition {
+                        name: decl_name,
+                        data,
+                        decl,
+                    });
+                }
                 stype.define();
             }
-            None => return Err(ArtifactError::Undeclared(name.as_ref().to_string())),
+            None => Err(ArtifactError::Undeclared(name.as_ref().to_string()))?,
         }
         Ok(())
     }
     /// Declare `import` to be an import with `kind`.
     /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
     pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
-        self.declare(
-            import.as_ref(),
-            match &kind {
-                &ImportKind::Function => Decl::FunctionImport,
-                &ImportKind::Data => Decl::DataImport,
-            },
-        )?;
+        self.declare(import.as_ref(), Decl::Import(kind))?;
         Ok(())
     }
     /// Link a relocation at `link.at` from `link.from` to `link.to`

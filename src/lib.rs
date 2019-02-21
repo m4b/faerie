@@ -1,3 +1,6 @@
+#![deny(missing_docs)]
+//! Faerie is a crate for creating object files.
+
 extern crate goblin;
 extern crate indexmap;
 extern crate scroll;

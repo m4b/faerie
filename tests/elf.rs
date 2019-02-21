@@ -14,7 +14,7 @@ use goblin::elf::*;
 fn file_name_is_same_as_symbol_name_issue_31() {
     const NAME: &str = "a";
     let mut obj = Artifact::new(triple!("x86_64-unknown-unknown-unknown-elf"), "a".into());
-    obj.declare(NAME, Decl::Function { global: true })
+    obj.declare(NAME, Decl::function().global())
         .expect("can declare");
     obj.define(NAME, vec![1, 2, 3, 4]).expect("can define");
     println!("\n{:#?}", obj);
@@ -54,9 +54,9 @@ fn file_name_is_same_as_symbol_name_issue_31() {
 fn link_symbol_pair_panic_issue_30() {
     let mut obj = Artifact::new(triple!("x86_64-unknown-unknown-unknown-elf"), "t.o".into());
 
-    obj.declare("a", Decl::Function { global: true })
+    obj.declare("a", Decl::function().global())
         .expect("can declare a");
-    obj.declare_with("b", Decl::Function { global: true }, vec![1, 2, 3, 4])
+    obj.declare_with("b", Decl::function().global(), vec![1, 2, 3, 4])
         .expect("can declare and define b");
 
     obj.link(Link {
