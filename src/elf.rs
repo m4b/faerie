@@ -6,7 +6,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    artifact::{self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc},
+    artifact::{
+        self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope, Visibility,
+    },
     target::make_ctx,
     Ctx,
 };
@@ -61,12 +63,10 @@ impl From<Architecture> for MachineTag {
 }
 
 /// The kind of symbol this is; used in [SymbolBuilder](struct.SymbolBuilder.html)
-enum SymbolType {
-    /// A function
-    Function,
-    /// A data object
-    Object,
-    /// An impor
+enum SymbolType<'a> {
+    /// From a definition
+    Decl(&'a DefinedDecl),
+    /// An import
     Import,
     /// A section reference
     Section,
@@ -77,31 +77,27 @@ enum SymbolType {
 }
 
 /// A builder for creating a 32/64 bit ELF symbol
-struct SymbolBuilder {
+struct SymbolBuilder<'a> {
     name_offset: usize,
-    global: bool,
     size: u64,
-    typ: SymbolType,
+    typ: SymbolType<'a>,
 }
 
-impl SymbolBuilder {
+impl<'a> SymbolBuilder<'a> {
     /// Create a new symbol with `typ`
-    pub fn new(typ: SymbolType) -> Self {
+    pub fn new(typ: SymbolType<'a>) -> Self {
         SymbolBuilder {
-            global: false,
             name_offset: 0,
             typ,
             size: 0,
         }
     }
+    pub fn from_decl(decl: &'a DefinedDecl) -> Self {
+        SymbolBuilder::new(SymbolType::Decl(decl))
+    }
     /// Set the size of this symbol; for functions, it should be the routines size in bytes
     pub fn size(mut self, size: usize) -> Self {
         self.size = size as u64;
-        self
-    }
-    /// Is this symbol local in scope?
-    pub fn local(mut self, local: bool) -> Self {
-        self.global = !local;
         self
     }
     /// Set the symbol name as a byte offset into the corresponding strtab
@@ -113,23 +109,40 @@ impl SymbolBuilder {
     pub fn create(self) -> Symbol {
         use goblin::elf::section_header::SHN_ABS;
         use goblin::elf::sym::{
-            STB_GLOBAL, STB_LOCAL, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT, STT_SECTION,
+            STB_GLOBAL, STB_LOCAL, STB_WEAK, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT,
+            STT_SECTION,
         };
         let mut st_shndx = 0;
         let mut st_info = 0;
         let st_value = 0;
+
+        fn scope_stb_flags(s: Scope) -> u8 {
+            let flag = match s {
+                Scope::Local => STB_LOCAL,
+                Scope::Global => STB_GLOBAL,
+                Scope::Weak => STB_WEAK,
+            };
+            flag << 4
+        }
+
         match self.typ {
-            SymbolType::Function => {
+            SymbolType::Decl(DefinedDecl::Function(d)) => {
                 st_info |= STT_FUNC;
+                st_info |= scope_stb_flags(d.get_scope());
             }
-            SymbolType::Object => {
+            SymbolType::Decl(DefinedDecl::Data(d)) => {
                 st_info |= STT_OBJECT;
+                st_info |= scope_stb_flags(d.get_scope());
+            }
+            SymbolType::Decl(DefinedDecl::CString(d)) => {
+                st_info |= STT_OBJECT;
+                st_info |= scope_stb_flags(d.get_scope());
             }
             SymbolType::Import => {
                 st_info = STT_NOTYPE;
                 st_info |= STB_GLOBAL << 4;
             }
-            SymbolType::Section => {
+            SymbolType::Decl(DefinedDecl::DebugSection(_)) | SymbolType::Section => {
                 st_info |= STT_SECTION;
                 st_info |= STB_LOCAL << 4;
             }
@@ -139,11 +152,6 @@ impl SymbolBuilder {
                 st_shndx = SHN_ABS as usize;
             }
             SymbolType::None => st_info = STT_NOTYPE,
-        }
-        if self.global {
-            st_info |= STB_GLOBAL << 4;
-        } else {
-            st_info |= STB_LOCAL << 4;
         }
         Symbol {
             st_name: self.name_offset,
@@ -483,15 +491,10 @@ impl<'a> Elf<'a> {
             idx, offset, self.sizeof_strtab
         );
         // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if let DefinedDecl::Function { .. } = decl {
-            SymbolType::Function
-        } else {
-            SymbolType::Object
-        })
-        .size(size)
-        .name_offset(offset)
-        .local(!decl.is_global())
-        .create();
+        let mut symbol = SymbolBuilder::from_decl(decl)
+            .size(size)
+            .name_offset(offset)
+            .create();
         symbol.st_shndx = shndx;
         // insert it into our symbol table
         self.symbols.insert(idx, symbol);
