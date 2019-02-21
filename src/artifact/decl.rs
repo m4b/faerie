@@ -437,15 +437,22 @@ impl DataDecl {
     visibility_methods!();
     datatype_methods!();
     align_methods!();
-    /// Set mutability to writable
-    pub fn writable(mut self) -> Self {
-        self.writable = true;
+    /// Builder for writability
+    pub fn with_writable(mut self, writable: bool) -> Self {
+        self.writable = writable;
         self
     }
+    /// Set mutability to writable
+    pub fn writable(self) -> Self {
+        self.with_writable(true)
+    }
     /// Set mutability to read-only
-    pub fn read_only(mut self) -> Self {
-        self.writable = false;
-        self
+    pub fn read_only(self) -> Self {
+        self.with_writable(false)
+    }
+    /// Setter for mutability
+    pub fn set_writable(&mut self, writable: bool) {
+        self.writable = writable;
     }
     /// Accessor for mutability
     pub fn is_writable(&self) -> bool {
