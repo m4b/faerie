@@ -30,6 +30,31 @@ impl ImportKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Linker binding scope of a definition
+pub enum Scope {
+    /// Available to all components
+    Global,
+    /// Available only inside the defining component
+    Local,
+    /// Available to all modules, but only selected if a Global
+    /// definition is not found
+    Weak,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Linker visibility of a definition
+pub enum Visibility {
+    /// Visibility determined by the symbol's `Scope`.
+    Default,
+    /// Visible in other components, but cannot be preempted. References to the symbol must be
+    /// resolved to this definition in that component, even if another definition would interpose
+    /// by the default rules.
+    Protected,
+    /// Not visible to other components, plus the constraints provided by `Protected`.
+    Hidden,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A declaration that is defined inside this artifact
 pub enum DefinedDecl {
     /// A function defined in this artifact
@@ -261,33 +286,87 @@ impl Into<Decl> for DataImportDecl {
     }
 }
 
+macro_rules! scope_methods {
+    () => {
+    /// Set scope to global
+    pub fn global(self) -> Self {
+        self.with_scope(Scope::Global)
+    }
+    /// Set scope to local
+    pub fn local(self) -> Self {
+        self.with_scope(Scope::Local)
+    }
+    /// Set scope to weak
+    pub fn weak(self) -> Self {
+        self.with_scope(Scope::Weak)
+    }
+    /// Builder for scope
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
+        self
+    }
+    /// Gst scope
+    pub fn get_scope(&self) -> Scope {
+        self.scope
+    }
+    /// Set scope
+    pub fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+    /// Check if scope is `Scope::Global`
+    pub fn is_global(&self) -> bool {
+        self.scope == Scope::Global
+    }
+}}
+
+macro_rules! visibility_methods {
+    () => {
+    /// Set visibility to default
+    pub fn default_visibility(self) -> Self {
+        self.with_visibility(Visibility::Default)
+    }
+    /// Set visibility to protected
+    pub fn protected(self) -> Self {
+        self.with_visibility(Visibility::Protected)
+    }
+    /// Set visibility to hidden
+    pub fn hidden(self) -> Self {
+        self.with_visibility(Visibility::Hidden)
+    }
+    /// Builder for visibility
+    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility =visibility;
+        self
+    }
+    /// Get visibility
+    pub fn get_visibility(&self) -> Visibility {
+        self.visibility
+    }
+    /// Set visibility
+    pub fn set_visibility(&mut self, visibility: Visibility) {
+        self.visibility = visibility;
+    }
+}}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for function declarations
 pub struct FunctionDecl {
-    global: bool,
+    scope: Scope,
+    visibility: Visibility,
 }
 
 impl Default for FunctionDecl {
     fn default() -> Self {
-        FunctionDecl { global: false }
+        FunctionDecl {
+            scope: Scope::Local,
+            visibility: Visibility::Default,
+        }
     }
 }
 
 impl FunctionDecl {
-    /// Set binding to global
-    pub fn global(mut self) -> Self {
-        self.global = true;
-        self
-    }
-    /// Set binding to local
-    pub fn local(mut self) -> Self {
-        self.global = false;
-        self
-    }
-    /// Accessor for binding
-    pub fn is_global(&self) -> bool {
-        self.global
-    }
+    scope_methods!();
+    visibility_methods!();
 }
 
 impl Into<Decl> for FunctionDecl {
@@ -299,34 +378,24 @@ impl Into<Decl> for FunctionDecl {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for data declarations
 pub struct DataDecl {
-    global: bool,
+    scope: Scope,
+    visibility: Visibility,
     writable: bool,
 }
 
 impl Default for DataDecl {
     fn default() -> Self {
         DataDecl {
-            global: false,
+            scope: Scope::Local,
+            visibility: Visibility::Default,
             writable: false,
         }
     }
 }
 
 impl DataDecl {
-    /// Set binding to global
-    pub fn global(mut self) -> Self {
-        self.global = true;
-        self
-    }
-    /// Set binding to local
-    pub fn local(mut self) -> Self {
-        self.global = false;
-        self
-    }
-    /// Accessor for binding
-    pub fn is_global(&self) -> bool {
-        self.global
-    }
+    scope_methods!();
+    visibility_methods!();
     /// Set mutability to writable
     pub fn writable(mut self) -> Self {
         self.writable = true;
@@ -352,30 +421,22 @@ impl Into<Decl> for DataDecl {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for a CString (0-terminated character sequence) declaration
 pub struct CStringDecl {
-    global: bool,
+    scope: Scope,
+    visibility: Visibility,
 }
 
 impl Default for CStringDecl {
     fn default() -> Self {
-        CStringDecl { global: false }
+        CStringDecl {
+            scope: Scope::Local,
+            visibility: Visibility::Default,
+        }
     }
 }
 
 impl CStringDecl {
-    /// Set binding to global
-    pub fn global(mut self) -> Self {
-        self.global = true;
-        self
-    }
-    /// Set binding to local
-    pub fn local(mut self) -> Self {
-        self.global = false;
-        self
-    }
-    /// Accessor for binding
-    pub fn is_global(&self) -> bool {
-        self.global
-    }
+    scope_methods!();
+    visibility_methods!();
 }
 
 impl Into<Decl> for CStringDecl {
