@@ -114,6 +114,7 @@ impl<'a> SymbolBuilder<'a> {
         };
         let mut st_shndx = 0;
         let mut st_info = 0;
+        let mut st_other = 0;
         let st_value = 0;
 
         fn scope_stb_flags(s: Scope) -> u8 {
@@ -125,18 +126,30 @@ impl<'a> SymbolBuilder<'a> {
             flag << 4
         }
 
+        // TODO put these into goblin
+        fn vis_stother_flags(v: Visibility) -> u8 {
+            match v {
+                Visibility::Default => 0,
+                Visibility::Hidden => 2,
+                Visibility::Protected => 3,
+            }
+        }
+
         match self.typ {
             SymbolType::Decl(DefinedDecl::Function(d)) => {
                 st_info |= STT_FUNC;
                 st_info |= scope_stb_flags(d.get_scope());
+                st_other |= vis_stother_flags(d.get_visibility());
             }
             SymbolType::Decl(DefinedDecl::Data(d)) => {
                 st_info |= STT_OBJECT;
                 st_info |= scope_stb_flags(d.get_scope());
+                st_other |= vis_stother_flags(d.get_visibility());
             }
             SymbolType::Decl(DefinedDecl::CString(d)) => {
                 st_info |= STT_OBJECT;
                 st_info |= scope_stb_flags(d.get_scope());
+                st_other |= vis_stother_flags(d.get_visibility());
             }
             SymbolType::Import => {
                 st_info = STT_NOTYPE;
@@ -155,7 +168,7 @@ impl<'a> SymbolBuilder<'a> {
         }
         Symbol {
             st_name: self.name_offset,
-            st_other: 0,
+            st_other,
             st_size: self.size,
             st_info,
             st_shndx,
