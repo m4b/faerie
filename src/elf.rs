@@ -201,6 +201,7 @@ struct SectionBuilder {
     alloc: bool,
     size: u64,
     name_offset: usize,
+    align: Option<usize>,
 }
 
 impl SectionBuilder {
@@ -213,6 +214,7 @@ impl SectionBuilder {
             alloc: false,
             name_offset: 0,
             size,
+            align: None,
         }
     }
     /// Make this section executable
@@ -228,6 +230,11 @@ impl SectionBuilder {
     /// Make this section writable
     pub fn writable(mut self, writable: bool) -> Self {
         self.write = writable;
+        self
+    }
+    /// Specify section alignment
+    pub fn align(mut self, align: Option<usize>) -> Self {
+        self.align = align;
         self
     }
 
@@ -257,36 +264,29 @@ impl SectionBuilder {
         if self.alloc {
             shdr.sh_flags |= SHF_ALLOC as u64
         }
+
+        let align = if let Some(align) = self.align {
+            align as u64
+        } else if self.exec {
+            0x10
+        } else if self.write {
+            0x8
+        } else {
+            1
+        };
+
         match self.typ {
             SectionType::Bits => {
-                shdr.sh_addralign = if self.exec {
-                    0x10
-                } else if self.write {
-                    0x8
-                } else {
-                    1
-                };
-                shdr.sh_type = SHT_PROGBITS
+                shdr.sh_addralign = align;
+                shdr.sh_type = SHT_PROGBITS;
             }
             SectionType::String => {
-                shdr.sh_addralign = if self.exec {
-                    0x10
-                } else if self.write {
-                    0x8
-                } else {
-                    1
-                };
+                shdr.sh_addralign = align;
                 shdr.sh_type = SHT_PROGBITS;
                 shdr.sh_flags |= (SHF_MERGE | SHF_STRINGS) as u64;
             }
             SectionType::Data => {
-                shdr.sh_addralign = if self.exec {
-                    0x10
-                } else if self.write {
-                    0x8
-                } else {
-                    1
-                };
+                shdr.sh_addralign = align;
                 shdr.sh_type = SHT_PROGBITS;
             }
             SectionType::StrTab => {

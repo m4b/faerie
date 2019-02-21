@@ -41,6 +41,39 @@ pub enum Scope {
     Weak,
 }
 
+macro_rules! scope_methods {
+    () => {
+    /// Set scope to global
+    pub fn global(self) -> Self {
+        self.with_scope(Scope::Global)
+    }
+    /// Set scope to local
+    pub fn local(self) -> Self {
+        self.with_scope(Scope::Local)
+    }
+    /// Set scope to weak
+    pub fn weak(self) -> Self {
+        self.with_scope(Scope::Weak)
+    }
+    /// Builder for scope
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
+        self
+    }
+    /// Gst scope
+    pub fn get_scope(&self) -> Scope {
+        self.scope
+    }
+    /// Set scope
+    pub fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+    /// Check if scope is `Scope::Global`
+    pub fn is_global(&self) -> bool {
+        self.scope == Scope::Global
+    }
+}}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Linker visibility of a definition
 pub enum Visibility {
@@ -52,6 +85,80 @@ pub enum Visibility {
     Protected,
     /// Not visible to other components, plus the constraints provided by `Protected`.
     Hidden,
+}
+
+macro_rules! visibility_methods {
+    () => {
+    /// Set visibility to default
+    pub fn default_visibility(self) -> Self {
+        self.with_visibility(Visibility::Default)
+    }
+    /// Set visibility to protected
+    pub fn protected(self) -> Self {
+        self.with_visibility(Visibility::Protected)
+    }
+    /// Set visibility to hidden
+    pub fn hidden(self) -> Self {
+        self.with_visibility(Visibility::Hidden)
+    }
+    /// Builder for visibility
+    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility =visibility;
+        self
+    }
+    /// Get visibility
+    pub fn get_visibility(&self) -> Visibility {
+        self.visibility
+    }
+    /// Set visibility
+    pub fn set_visibility(&mut self, visibility: Visibility) {
+        self.visibility = visibility;
+    }
+}}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Type of data declared
+pub enum DataType {
+    /// Ordinary raw bytes
+    Bytes,
+    /// 0-terminated ascii string
+    String,
+}
+
+macro_rules! datatype_methods {
+    () => {
+    /// Build datatype
+    pub fn with_datatype(mut self, datatype: DataType) -> Self {
+        self.datatype = datatype;
+        self
+    }
+    /// Set datatype
+    pub fn set_datatype(&mut self, datatype: DataType) {
+        self.datatype = datatype;
+    }
+    /// Get datatype
+    pub fn get_datatype(&self) -> DataType {
+        self.datatype
+    }
+    }
+}
+
+macro_rules! align_methods {
+    () => {
+    /// Build alignment
+    pub fn with_align(mut self, align: Option<usize>) -> Self {
+        self.align = align;
+        self
+    }
+    /// Set alignment
+    pub fn set_align(&mut self, align: Option<usize>) {
+        self.align = align;
+    }
+    /// Get alignment
+    pub fn get_align(&self) -> Option<usize> {
+        self.align
+    }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -103,9 +210,7 @@ impl DefinedDecl {
     pub fn is_writable(&self) -> bool {
         match self {
             DefinedDecl::Data(a) => a.is_writable(),
-            DefinedDecl::Function(_) | DefinedDecl::DebugSection(_) => {
-                false
-            }
+            DefinedDecl::Function(_) | DefinedDecl::DebugSection(_) => false,
         }
     }
 }
@@ -275,73 +380,12 @@ impl Into<Decl> for DataImportDecl {
     }
 }
 
-macro_rules! scope_methods {
-    () => {
-    /// Set scope to global
-    pub fn global(self) -> Self {
-        self.with_scope(Scope::Global)
-    }
-    /// Set scope to local
-    pub fn local(self) -> Self {
-        self.with_scope(Scope::Local)
-    }
-    /// Set scope to weak
-    pub fn weak(self) -> Self {
-        self.with_scope(Scope::Weak)
-    }
-    /// Builder for scope
-    pub fn with_scope(mut self, scope: Scope) -> Self {
-        self.scope = scope;
-        self
-    }
-    /// Gst scope
-    pub fn get_scope(&self) -> Scope {
-        self.scope
-    }
-    /// Set scope
-    pub fn set_scope(&mut self, scope: Scope) {
-        self.scope = scope;
-    }
-    /// Check if scope is `Scope::Global`
-    pub fn is_global(&self) -> bool {
-        self.scope == Scope::Global
-    }
-}}
-
-macro_rules! visibility_methods {
-    () => {
-    /// Set visibility to default
-    pub fn default_visibility(self) -> Self {
-        self.with_visibility(Visibility::Default)
-    }
-    /// Set visibility to protected
-    pub fn protected(self) -> Self {
-        self.with_visibility(Visibility::Protected)
-    }
-    /// Set visibility to hidden
-    pub fn hidden(self) -> Self {
-        self.with_visibility(Visibility::Hidden)
-    }
-    /// Builder for visibility
-    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
-        self.visibility =visibility;
-        self
-    }
-    /// Get visibility
-    pub fn get_visibility(&self) -> Visibility {
-        self.visibility
-    }
-    /// Set visibility
-    pub fn set_visibility(&mut self, visibility: Visibility) {
-        self.visibility = visibility;
-    }
-}}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for function declarations
 pub struct FunctionDecl {
     scope: Scope,
     visibility: Visibility,
+    align: Option<usize>,
 }
 
 impl Default for FunctionDecl {
@@ -349,6 +393,7 @@ impl Default for FunctionDecl {
         FunctionDecl {
             scope: Scope::Local,
             visibility: Visibility::Default,
+            align: None,
         }
     }
 }
@@ -356,6 +401,7 @@ impl Default for FunctionDecl {
 impl FunctionDecl {
     scope_methods!();
     visibility_methods!();
+    align_methods!();
 }
 
 impl Into<Decl> for FunctionDecl {
@@ -365,39 +411,13 @@ impl Into<Decl> for FunctionDecl {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-/// Type of data declared
-pub enum DataType {
-    /// Ordinary raw bytes
-    Bytes,
-    /// 0-terminated ascii string
-    String,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for data declarations
 pub struct DataDecl {
     scope: Scope,
     visibility: Visibility,
     writable: bool,
     datatype: DataType,
-}
-
-macro_rules! datatype_methods {
-    () => {
-    /// Build datatype
-    pub fn with_datatype(mut self, datatype: DataType) -> Self {
-        self.datatype = datatype;
-        self
-    }
-    /// Set datatype
-    pub fn set_datatype(&mut self, datatype: DataType) {
-        self.datatype = datatype;
-    }
-    /// Get datatype
-    pub fn get_datatype(&self) -> DataType {
-        self.datatype
-    }
-    }
+    align: Option<usize>,
 }
 
 impl Default for DataDecl {
@@ -407,6 +427,7 @@ impl Default for DataDecl {
             visibility: Visibility::Default,
             writable: false,
             datatype: DataType::Bytes,
+            align: None,
         }
     }
 }
@@ -415,6 +436,7 @@ impl DataDecl {
     scope_methods!();
     visibility_methods!();
     datatype_methods!();
+    align_methods!();
     /// Set mutability to writable
     pub fn writable(mut self) -> Self {
         self.writable = true;
@@ -429,7 +451,6 @@ impl DataDecl {
     pub fn is_writable(&self) -> bool {
         self.writable
     }
-
 }
 
 impl Into<Decl> for DataDecl {
@@ -438,13 +459,16 @@ impl Into<Decl> for DataDecl {
     }
 }
 
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for a debug section declaration
-pub struct DebugSectionDecl { datatype: DataType }
+pub struct DebugSectionDecl {
+    datatype: DataType,
+    align: Option<usize>,
+}
 
 impl DebugSectionDecl {
     datatype_methods!();
+    align_methods!();
     /// Debug sections are never global, but we have an accessor
     /// for symmetry with other section declarations
     pub fn is_global(&self) -> bool {
@@ -454,7 +478,10 @@ impl DebugSectionDecl {
 
 impl Default for DebugSectionDecl {
     fn default() -> Self {
-        DebugSectionDecl { datatype: DataType::Bytes }
+        DebugSectionDecl {
+            datatype: DataType::Bytes,
+            align: None,
+        }
     }
 }
 
