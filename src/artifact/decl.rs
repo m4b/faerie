@@ -382,6 +382,24 @@ pub struct DataDecl {
     datatype: DataType,
 }
 
+macro_rules! datatype_methods {
+    () => {
+    /// Build datatype
+    pub fn with_datatype(mut self, datatype: DataType) -> Self {
+        self.datatype = datatype;
+        self
+    }
+    /// Set datatype
+    pub fn set_datatype(&mut self, datatype: DataType) {
+        self.datatype = datatype;
+    }
+    /// Get datatype
+    pub fn get_datatype(&self) -> DataType {
+        self.datatype
+    }
+    }
+}
+
 impl Default for DataDecl {
     fn default() -> Self {
         DataDecl {
@@ -396,6 +414,7 @@ impl Default for DataDecl {
 impl DataDecl {
     scope_methods!();
     visibility_methods!();
+    datatype_methods!();
     /// Set mutability to writable
     pub fn writable(mut self) -> Self {
         self.writable = true;
@@ -411,19 +430,6 @@ impl DataDecl {
         self.writable
     }
 
-    /// Build datatype
-    pub fn with_datatype(mut self, datatype: DataType) -> Self {
-        self.datatype = datatype;
-        self
-    }
-    /// Set datatype
-    pub fn set_datatype(&mut self, datatype: DataType) {
-        self.datatype = datatype;
-    }
-    /// Get datatype
-    pub fn get_datatype(&self) -> DataType {
-        self.datatype
-    }
 }
 
 impl Into<Decl> for DataDecl {
@@ -435,9 +441,10 @@ impl Into<Decl> for DataDecl {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for a debug section declaration
-pub struct DebugSectionDecl {}
+pub struct DebugSectionDecl { datatype: DataType }
 
 impl DebugSectionDecl {
+    datatype_methods!();
     /// Debug sections are never global, but we have an accessor
     /// for symmetry with other section declarations
     pub fn is_global(&self) -> bool {
@@ -447,7 +454,7 @@ impl DebugSectionDecl {
 
 impl Default for DebugSectionDecl {
     fn default() -> Self {
-        DebugSectionDecl {}
+        DebugSectionDecl { datatype: DataType::Bytes }
     }
 }
 

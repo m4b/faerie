@@ -7,7 +7,8 @@
 
 use crate::{
     artifact::{
-        self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope, Visibility, DataType
+        self, Artifact, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
+        Visibility,
     },
     target::make_ctx,
     Ctx,
@@ -190,15 +191,6 @@ enum SectionType {
     SymTab,
     Relocation,
     None,
-}
-
-impl SectionType {
-    pub fn from_datatype(datatype: DataType) -> Self {
-        match datatype {
-            DataType::Bytes => SectionType::Bits,
-            DataType::String => SectionType::String,
-        }
-    }
 }
 
 /// A builder for creating a 32/64 bit section
@@ -501,15 +493,22 @@ impl<'a> Elf<'a> {
                 .writable(false)
                 .exec(true),
             DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
-                .section_type(SectionType::from_datatype(d.get_datatype()))
+                .section_type(match d.get_datatype() {
+                    DataType::Bytes => SectionType::Data,
+                    DataType::String => SectionType::String,
+                })
                 .alloc()
                 .writable(d.is_writable())
                 .exec(false),
-            DefinedDecl::DebugSection(_) => SectionBuilder::new(def_size as u64).section_type(
+            DefinedDecl::DebugSection(d) => SectionBuilder::new(def_size as u64).section_type(
+                // TODO: this behavior should be deprecated, but we need to warn users!
                 if name == ".debug_str" || name == ".debug_line_str" {
                     SectionType::String
                 } else {
-                    SectionType::Bits
+                    match d.get_datatype() {
+                        DataType::Bytes => SectionType::Bits,
+                        DataType::String => SectionType::String,
+                    }
                 },
             ),
         };
@@ -548,7 +547,9 @@ impl<'a> Elf<'a> {
         let size = data.len();
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab
-        let section_symbol = SymbolBuilder::new(SymbolType::Section).section_index(shndx).create();
+        let section_symbol = SymbolBuilder::new(SymbolType::Section)
+            .section_index(shndx)
+            .create();
 
         let mut section = section.name_offset(offset).create(&self.ctx);
         // the offset is the head of how many program bits we've added
