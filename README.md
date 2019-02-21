@@ -13,11 +13,11 @@ let mut obj = ArtifactBuilder::new(triple!("x86_64-unknown-unknown-unknown-elf")
 // it is a runtime error to define a symbol _without_ declaring it first
 obj.declarations(
     [
-        ("deadbeef", Decl::Function { global: false }),
-        ("main",     Decl::Function { global: true }),
-        ("str.1",    Decl::CString { global: false }),
-        ("DEADBEEF", Decl::DataImport),
-        ("printf",   Decl::FunctionImport),
+        ("deadbeef", Decl::function().into()),
+        ("main",     Decl::function().global().into()),
+        ("str.1",    Decl::cstring().into()),
+        ("DEADBEEF", Decl::data_import()),
+        ("printf",   Decl::function_import()),
     ].into_iter().cloned()
 )?;
 
@@ -89,7 +89,7 @@ e_phoff: <font color="#C4A000">0x0</font> e_shoff: <font color="#C4A000">0x2a2</
   <span style="background-color:#D3D7CF"><font color="#2E3436">0  </font></span>   <span style="background-color:#D3D7CF"><font color="#2E3436">               </font></span>       SHT_NULL                          <font color="#C4A000">0x0   </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0x0  </b></font>                0x0       0x0    
   <span style="background-color:#2E3436"><font color="#D3D7CF">1  </font></span>   <span style="background-color:#2E3436"><font color="#D3D7CF">.strtab        </font></span>     SHT_STRTAB                          <font color="#C4A000">0x8c  </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0xc6 </b></font>                0x0       0x1    
   <span style="background-color:#D3D7CF"><font color="#2E3436">2  </font></span>   <span style="background-color:#D3D7CF"><font color="#2E3436">.symtab        </font></span>     SHT_SYMTAB                          <font color="#C4A000">0x152 </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0xf0 </b></font>   .strtab(1)   0x18      0x8    
-  <span style="background-color:#2E3436"><font color="#D3D7CF">3  </font></span>   <span style="background-color:#2E3436"><font color="#D3D7CF">.data.str.1    </font></span>   SHT_PROGBITS   <b>ALLOC MERGE STRINGS </b>   <font color="#C4A000">0x40  </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0x10 </b></font>                0x1       0x1    
+  <span style="background-color:#2E3436"><font color="#D3D7CF">3  </font></span>   <span style="background-color:#2E3436"><font color="#D3D7CF">.rodata.str.1    </font></span>   SHT_PROGBITS   <b>ALLOC MERGE STRINGS </b>   <font color="#C4A000">0x40  </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0x10 </b></font>                0x1       0x1    
   <span style="background-color:#D3D7CF"><font color="#2E3436">4  </font></span>   <span style="background-color:#D3D7CF"><font color="#2E3436">.text.deadbeef </font></span>   SHT_PROGBITS   <b>ALLOC EXECINSTR     </b>   <font color="#C4A000">0x50  </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0x14 </b></font>                0x0       0x10   
   <span style="background-color:#2E3436"><font color="#D3D7CF">5  </font></span>   <span style="background-color:#2E3436"><font color="#D3D7CF">.text.main     </font></span>   SHT_PROGBITS   <b>ALLOC EXECINSTR     </b>   <font color="#C4A000">0x64  </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0x28 </b></font>                0x0       0x10   
   <span style="background-color:#D3D7CF"><font color="#2E3436">6  </font></span>   <span style="background-color:#D3D7CF"><font color="#2E3436">.reloc.main    </font></span>       SHT_RELA                          <font color="#C4A000">0x242 </font>   <font color="#CC0000"><b>0x0 </b></font>   <font color="#4E9A06"><b>0x48 </b></font>   .symtab(2)   0x18      0x8    
@@ -100,10 +100,10 @@ e_phoff: <font color="#C4A000">0x0</font> e_shoff: <font color="#C4A000">0x2a2</
   <b>             Addr</b>   <b>Bind    </b>   <b>Type     </b>   <b>Symbol  </b>   <b>Size </b>   <b>Section          </b>   <b>Other</b>  
   <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   NOTYPE                 <font color="#4E9A06">0x0  </font>                       0x0    
   <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   FILE        <font color="#FCE94F"><b>test.o  </b></font>   <font color="#4E9A06">0x0  </font>   <font color="#D3D7CF"><i>ABS              </i></font>   0x0    
-  <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   SECTION                <font color="#4E9A06">0x0  </font>   .data.str.1(3)      0x0    
+  <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   SECTION                <font color="#4E9A06">0x0  </font>   .rodata.str.1(3)      0x0    
   <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   SECTION                <font color="#4E9A06">0x0  </font>   .text.deadbeef(4)   0x0    
   <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   SECTION                <font color="#4E9A06">0x0  </font>   .text.main(5)       0x0    
-  <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   <font color="#FCE94F"><b>OBJECT   </b></font>   <font color="#FCE94F"><b>str.1   </b></font>   <font color="#4E9A06">0x10 </font>   .data.str.1(3)      0x0    
+  <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   <font color="#FCE94F"><b>OBJECT   </b></font>   <font color="#FCE94F"><b>str.1   </b></font>   <font color="#4E9A06">0x10 </font>   .rodata.str.1(3)      0x0    
   <font color="#CC0000">               0 </font>   <span style="background-color:#34E2E2"><font color="#555753"><b>LOCAL   </b></font></span>   <font color="#EF2929"><b>FUNC     </b></font>   <font color="#FCE94F"><b>deadbeef</b></font>   <font color="#4E9A06">0x14 </font>   .text.deadbeef(4)   0x0    
   <font color="#CC0000">               0 </font>   <span style="background-color:#EF2929"><font color="#555753"><b>GLOBAL  </b></font></span>   <font color="#EF2929"><b>FUNC     </b></font>   <font color="#FCE94F"><b>main    </b></font>   <font color="#4E9A06">0x28 </font>   .text.main(5)       0x0    
   <font color="#CC0000">               0 </font>   <span style="background-color:#EF2929"><font color="#555753"><b>GLOBAL  </b></font></span>   NOTYPE      <font color="#FCE94F"><b>DEADBEEF</b></font>   <font color="#4E9A06">0x0  </font>                       0x0    
@@ -111,7 +111,7 @@ e_phoff: <font color="#C4A000">0x0</font> e_shoff: <font color="#C4A000">0x2a2</
 
 <font color="#D3D7CF">Shdr Relocations(4)</font>:
 <font color="#D3D7CF"><b>  .text.main</b></font>(3)
-<font color="#CC0000">              13</font> X86_64_PC32 <font color="#C4A000"><b>.data.str.1</b></font>
+<font color="#CC0000">              13</font> X86_64_PC32 <font color="#C4A000"><b>.rodata.str.1</b></font>
 <font color="#CC0000">              1d</font> X86_64_PLT32 <font color="#C4A000"><b>printf</b></font>+<font color="#CC0000">-4</font>
 <font color="#CC0000">               a</font> X86_64_PLT32 <font color="#C4A000"><b>.text.deadbeef</b></font>+<font color="#CC0000">-4</font>
 
