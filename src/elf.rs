@@ -81,6 +81,7 @@ struct SymbolBuilder<'a> {
     name_offset: usize,
     size: u64,
     typ: SymbolType<'a>,
+    shndx: usize,
 }
 
 impl<'a> SymbolBuilder<'a> {
@@ -90,6 +91,7 @@ impl<'a> SymbolBuilder<'a> {
             name_offset: 0,
             typ,
             size: 0,
+            shndx: 0,
         }
     }
     pub fn from_decl(decl: &'a DefinedDecl) -> Self {
@@ -105,6 +107,13 @@ impl<'a> SymbolBuilder<'a> {
         self.name_offset = name_offset;
         self
     }
+    /// Set the section index
+    pub fn section_index(mut self, shndx: usize) -> Self {
+        // Underlying representation is only 16 bits. Catch this early!
+        debug_assert!(shndx < u16::max_value() as usize);
+        self.shndx = shndx;
+        self
+    }
     /// Finalize and create the symbol
     pub fn create(self) -> Symbol {
         use goblin::elf::section_header::SHN_ABS;
@@ -112,7 +121,7 @@ impl<'a> SymbolBuilder<'a> {
             STB_GLOBAL, STB_LOCAL, STB_WEAK, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT,
             STT_SECTION,
         };
-        let mut st_shndx = 0;
+        let mut st_shndx = self.shndx;
         let mut st_info = 0;
         let mut st_other = 0;
         let st_value = 0;
@@ -465,61 +474,70 @@ impl<'a> Elf<'a> {
         }
     }
     pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::DefinedDecl) {
-        // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
+        // sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
         if !decl.is_global() {
             self.nlocals += 1;
         }
-        // FIXME: this is kind of hacky?
-        let segment_name = if let DefinedDecl::Function { .. } = decl {
-            "text"
-        } else {
-            // we'd add ro here once the prop supports that
-            "data"
+        let def_size = data.len();
+
+        let section_name = match decl {
+            DefinedDecl::Function(_) => format!(".text.{}", name),
+            DefinedDecl::Data(d) => format!(
+                ".{}.{}",
+                if d.is_writable() { "data" } else { "rodata" },
+                name
+            ),
+            DefinedDecl::CString(_) => format!(".rodata.{}", name),
+            DefinedDecl::DebugSection(_) => name.to_owned(),
         };
-        let section_name = format!(".{}.{}", segment_name, name);
-        // store the size of this code
-        let size = data.len();
 
-        // now we build the section a la LLVM "function sections"
-        // FIXME: probably add padding alignment
-        let section = {
-            let stype = match decl {
-                DefinedDecl::Function { .. } => SectionType::Bits,
-                DefinedDecl::CString { .. } => SectionType::String,
-                _ => SectionType::Data,
-            };
-
-            SectionBuilder::new(size as u64)
-                .section_type(stype)
+        let section = match decl {
+            DefinedDecl::Function(_) => SectionBuilder::new(def_size as u64)
+                .section_type(SectionType::Bits)
                 .alloc()
-                .writable(decl.is_writable())
-                .exec(decl.is_function())
+                .writable(false)
+                .exec(true),
+            DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
+                .section_type(SectionType::Data)
+                .alloc()
+                .writable(d.is_writable())
+                .exec(false),
+            DefinedDecl::CString(_) => SectionBuilder::new(def_size as u64)
+                .section_type(SectionType::String)
+                .alloc()
+                .writable(false)
+                .exec(false),
+            DefinedDecl::DebugSection(_) => SectionBuilder::new(def_size as u64).section_type(
+                if name == ".debug_str" || name == ".debug_line_str" {
+                    SectionType::String
+                } else {
+                    SectionType::Bits
+                },
+            ),
         };
+
         let shndx = self.add_progbits(section_name, section, data);
 
-        // can do prefix optimization here actually, because .text.*
-        let (idx, offset) = self.new_string(name.to_string());
-        debug!(
-            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
-            idx, offset, self.sizeof_strtab
-        );
-        // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::from_decl(decl)
-            .size(size)
-            .name_offset(offset)
-            .create();
-        symbol.st_shndx = shndx;
-        // insert it into our symbol table
-        self.symbols.insert(idx, symbol);
-    }
-    pub fn add_section(&mut self, name: &str, data: &'a [u8], _decl: &artifact::DefinedDecl) {
-        let stype = if name == ".debug_str" || name == ".debug_line_str" {
-            SectionType::String
-        } else {
-            SectionType::Bits
-        };
-        let section = SectionBuilder::new(data.len() as u64).section_type(stype);
-        self.add_progbits(name.to_string(), section, data);
+        match decl {
+            DefinedDecl::Function(_) | DefinedDecl::Data(_) | DefinedDecl::CString(_) => {
+                let (idx, offset) = self.new_string(name.to_string());
+                debug!(
+                    "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+                    idx, offset, self.sizeof_strtab
+                );
+                // build symbol based on this _and_ the properties of the definition
+                let symbol = SymbolBuilder::from_decl(decl)
+                    .size(def_size)
+                    .name_offset(offset)
+                    .section_index(shndx)
+                    .create();
+                // insert it into our symbol table
+                self.symbols.insert(idx, symbol);
+            }
+            DefinedDecl::DebugSection(_) => {
+                // No symbols in debug sections, yet...
+            }
+        }
     }
     /// Create a progbits section (and its section symbol), and return the section index.
     fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
@@ -532,8 +550,7 @@ impl<'a> Elf<'a> {
         let size = data.len();
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab
-        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
-        section_symbol.st_shndx = shndx;
+        let section_symbol = SymbolBuilder::new(SymbolType::Section).section_index(shndx).create();
 
         let mut section = section.name_offset(offset).create(&self.ctx);
         // the offset is the head of how many program bits we've added
@@ -867,11 +884,7 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        if let DefinedDecl::DebugSection { .. } = def.decl {
-            elf.add_section(def.name, def.data, def.decl);
-        } else {
-            elf.add_definition(def.name, def.data, def.decl);
-        }
+        elf.add_definition(def.name, def.data, def.decl);
     }
     for (ref import, ref kind) in artifact.imports() {
         debug!("Import: {:?} -> {:?}", import, kind);
