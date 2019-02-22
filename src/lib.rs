@@ -25,5 +25,5 @@ pub use crate::artifact::{
         DataDecl, DataImportDecl, DataType, DebugSectionDecl, Decl, FunctionDecl,
         FunctionImportDecl, Scope, Visibility,
     },
-    Artifact, ArtifactBuilder, ImportKind, Link, Reloc,
+    Artifact, ArtifactBuilder, ArtifactError, ImportKind, Link, Reloc,
 };

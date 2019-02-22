@@ -1,5 +1,4 @@
 use crate::artifact::ArtifactError;
-use failure::Error;
 
 /// The kind of declaration this is
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -254,7 +253,7 @@ impl Decl {
     /// 4. Anything else is a [IncompatibleDeclaration](enum.ArtifactError.html#variant.IncompatibleDeclaration) error!
     // ref https://github.com/m4b/faerie/issues/24
     // ref https://github.com/m4b/faerie/issues/18
-    pub fn absorb(&mut self, other: Self) -> Result<(), Error> {
+    pub fn absorb(&mut self, other: Self) -> Result<(), ArtifactError> {
         // FIXME: i can't think of a way offhand to not clone here, without unusual contortions
         match self.clone() {
             Decl::Import(ImportKind::Data) => {
