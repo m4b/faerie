@@ -3,11 +3,13 @@ extern crate goblin;
 extern crate scroll;
 #[macro_use]
 extern crate target_lexicon;
-
-use std::str::FromStr;
+#[macro_use]
+extern crate failure;
 
 use faerie::{Artifact, Decl, Link};
+use failure::Error;
 use goblin::elf::*;
+use std::str::FromStr;
 
 #[test]
 // This test is for a known bug (issue #31).
@@ -71,4 +73,173 @@ fn link_symbol_pair_panic_issue_30() {
     // The `emit` method will check that there are undefined symbols
     // and return an error describing them:
     assert!(obj.emit().is_err());
+}
+
+
+#[test]
+fn decl_attributes() {
+    decl_tests(vec![
+        DeclTestCase::new("weak_func", Decl::function().weak(), |sym, sect| {
+            ensure!(sym.is_function(), "symbol is function");
+            ensure!(sym.st_bind() == sym::STB_WEAK, "symbol is weak");
+            ensure!(sym.st_visibility() == sym::STV_DEFAULT, "symbol is default vis");
+            ensure!(sect.is_executable(), "executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("weak_data", Decl::data().weak(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_WEAK, "symbol is weak");
+            ensure!(sym.st_visibility() == sym::STV_DEFAULT, "symbol is default vis");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("weak_data_writable", Decl::data().weak().writable(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_WEAK, "symbol is weak");
+            ensure!(sym.st_visibility() == sym::STV_DEFAULT, "symbol is default vis");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(sect.is_writable(), "mutable");
+            Ok(())
+        }),
+        DeclTestCase::new("weak_cstring", Decl::cstring().weak(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_WEAK, "symbol is weak");
+            ensure!(sym.st_visibility() == sym::STV_DEFAULT, "symbol is default vis");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("hidden_func", Decl::function().hidden(), |sym, sect| {
+            ensure!(sym.is_function(), "symbol is func");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is local");
+            ensure!(sym.st_visibility() == sym::STV_HIDDEN, "symbol is hidden");
+            ensure!(sect.is_executable(), "executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("hidden_data", Decl::data().hidden(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is local");
+            ensure!(sym.st_visibility() == sym::STV_HIDDEN, "symbol is hidden");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("hidden_cstring", Decl::cstring().hidden(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is weak");
+            ensure!(sym.st_visibility() == sym::STV_HIDDEN, "symbol is hidden");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("protected_func", Decl::function().protected(), |sym, sect| {
+            ensure!(sym.is_function(), "symbol is func");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is local");
+            ensure!(sym.st_visibility() == sym::STV_PROTECTED, "symbol is protected");
+            ensure!(sect.is_executable(), "executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("protected_data", Decl::data().protected(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is local");
+            ensure!(sym.st_visibility() == sym::STV_PROTECTED, "symbol is protected");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("protected_cstring", Decl::cstring().protected(), |sym, sect| {
+            ensure!(sym.st_type() == sym::STT_OBJECT, "symbol is object");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is weak");
+            ensure!(sym.st_visibility() == sym::STV_PROTECTED, "symbol is protected");
+            ensure!(!sect.is_executable(), "not executable");
+            ensure!(!sect.is_writable(), "immutable");
+            Ok(())
+        }),
+        DeclTestCase::new("ordinary_func", Decl::function(), |sym, sect| {
+            ensure!(sym.is_function(), "symbol is function");
+            ensure!(sym.st_bind() == sym::STB_LOCAL, "symbol is local");
+            ensure!(sym.st_visibility() == sym::STV_DEFAULT, "symbol is default vis");
+            ensure!(sect.is_executable(), "executable");
+            ensure!(!sect.is_writable(), "immutable");
+            ensure!(sect.sh_addralign == 16, "aligned to 16");
+            Ok(())
+        }),
+
+        DeclTestCase::new("custom_align_func", Decl::function().with_align(Some(64)), |_sym, sect| {
+            ensure!(sect.sh_addralign == 64, "expected aligned to 64, got {}", sect.sh_addralign);
+            Ok(())
+        }),
+
+        DeclTestCase::new("custom_align_data", Decl::data().with_align(Some(128)), |_sym, sect| {
+            ensure!(sect.sh_addralign == 128, "expected aligned to 128, got {}", sect.sh_addralign);
+            Ok(())
+        }),
+
+    ]);
+}
+
+/* test scaffolding: */
+
+fn decl_tests(tests: Vec<DeclTestCase>) {
+
+    let mut obj = Artifact::new(triple!("x86_64-unknown-unknown-unknown-elf"), "a".into());
+    for t in tests.iter() {
+        t.define(&mut obj);
+    }
+
+    println!("\n{:#?}", obj);
+    let bytes = obj.emit().expect("can emit elf file");
+    let bytes = bytes.as_slice();
+    println!("{:?}", bytes);
+
+    let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
+
+    match elf {
+        goblin::Object::Elf(elf) => {
+            for t in tests {
+                t.check(&elf)
+            }
+        }
+        _ => {
+            panic!("Elf file not parsed as elf file");
+        }
+    }
+}
+
+struct DeclTestCase {
+    name: String,
+    decl: Decl,
+    pred: Box<Fn(&Sym, &SectionHeader) -> Result<(), Error>>,
+}
+impl DeclTestCase {
+    fn new<D, F>(name: &str, decl: D, pred: F) -> Self
+    where
+        D: Into<Decl>,
+        F: Fn(&Sym, &SectionHeader) -> Result<(), Error> + 'static,
+    {
+        Self {
+            name: name.to_owned(),
+            decl: decl.into(),
+            pred: Box::new(pred),
+        }
+    }
+    fn define(&self, art: &mut Artifact) {
+        art.declare(&self.name, self.decl)
+            .expect(&format!("declare {}", self.name));
+        art.define(&self.name, vec![1, 2, 3, 4])
+            .expect(&format!("define {}", self.name));
+    }
+    fn check(&self, elf: &goblin::elf::Elf) {
+        let sym = elf
+            .syms
+            .iter()
+            .find(|sym| &elf.strtab[sym.st_name] == self.name)
+            .expect("symbol should exist");
+        let sectheader = elf.section_headers.get(sym.st_shndx).expect("section header should exist");
+        (self.pred)(&sym, sectheader).expect(&format!("check {}", self.name))
+    }
 }
