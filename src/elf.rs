@@ -486,11 +486,12 @@ impl<'a> Elf<'a> {
         };
 
         let section = match decl {
-            DefinedDecl::Function(_) => SectionBuilder::new(def_size as u64)
+            DefinedDecl::Function(d) => SectionBuilder::new(def_size as u64)
                 .section_type(SectionType::Bits)
                 .alloc()
                 .writable(false)
-                .exec(true),
+                .exec(true)
+                .align(d.get_align()),
             DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
                 .section_type(match d.get_datatype() {
                     DataType::Bytes => SectionType::Data,
@@ -498,7 +499,8 @@ impl<'a> Elf<'a> {
                 })
                 .alloc()
                 .writable(d.is_writable())
-                .exec(false),
+                .exec(false)
+                .align(d.get_align()),
             DefinedDecl::DebugSection(d) => SectionBuilder::new(def_size as u64).section_type(
                 // TODO: this behavior should be deprecated, but we need to warn users!
                 if name == ".debug_str" || name == ".debug_line_str" {
@@ -509,7 +511,8 @@ impl<'a> Elf<'a> {
                         DataType::String => SectionType::String,
                     }
                 },
-            ),
+            )
+            .align(d.get_align()),
         };
 
         let shndx = self.add_progbits(section_name, section, data);
