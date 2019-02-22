@@ -120,7 +120,7 @@ impl<'a> SymbolBuilder<'a> {
         use goblin::elf::section_header::SHN_ABS;
         use goblin::elf::sym::{
             STB_GLOBAL, STB_LOCAL, STB_WEAK, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT,
-            STT_SECTION, STV_DEFAULT, STV_HIDDEN, STV_PROTECTED
+            STT_SECTION, STV_DEFAULT, STV_HIDDEN, STV_PROTECTED,
         };
         let mut st_shndx = self.shndx;
         let mut st_info = 0;
@@ -501,18 +501,19 @@ impl<'a> Elf<'a> {
                 .writable(d.is_writable())
                 .exec(false)
                 .align(d.get_align()),
-            DefinedDecl::DebugSection(d) => SectionBuilder::new(def_size as u64).section_type(
-                // TODO: this behavior should be deprecated, but we need to warn users!
-                if name == ".debug_str" || name == ".debug_line_str" {
-                    SectionType::String
-                } else {
-                    match d.get_datatype() {
-                        DataType::Bytes => SectionType::Bits,
-                        DataType::String => SectionType::String,
-                    }
-                },
-            )
-            .align(d.get_align()),
+            DefinedDecl::DebugSection(d) => SectionBuilder::new(def_size as u64)
+                .section_type(
+                    // TODO: this behavior should be deprecated, but we need to warn users!
+                    if name == ".debug_str" || name == ".debug_line_str" {
+                        SectionType::String
+                    } else {
+                        match d.get_datatype() {
+                            DataType::Bytes => SectionType::Bits,
+                            DataType::String => SectionType::String,
+                        }
+                    },
+                )
+                .align(d.get_align()),
         };
 
         let shndx = self.add_progbits(section_name, section, data);

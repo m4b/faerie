@@ -282,7 +282,11 @@ impl Artifact {
     }
     /// Declare a new symbolic reference, with the given `decl`.
     /// **Note**: All declarations _must_ precede their definitions.
-    pub fn declare<T: AsRef<str>, D: Into<Decl>>(&mut self, name: T, decl: D) -> Result<(), ArtifactError> {
+    pub fn declare<T: AsRef<str>, D: Into<Decl>>(
+        &mut self,
+        name: T,
+        decl: D,
+    ) -> Result<(), ArtifactError> {
         let decl = decl.into();
         let decl_name = self.strings.get_or_intern(name.as_ref());
         let previous_was_import;
