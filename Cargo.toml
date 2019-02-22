@@ -17,7 +17,7 @@ name = "prototype"
 path = "src/bin/main.rs"
 
 [dependencies]
-goblin = "0.0.19"
+goblin = "0.0.21"
 scroll = "0.9"
 log = "0.4"
 env_logger = "0.5"

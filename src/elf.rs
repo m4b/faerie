@@ -120,7 +120,7 @@ impl<'a> SymbolBuilder<'a> {
         use goblin::elf::section_header::SHN_ABS;
         use goblin::elf::sym::{
             STB_GLOBAL, STB_LOCAL, STB_WEAK, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT,
-            STT_SECTION,
+            STT_SECTION, STV_DEFAULT, STV_HIDDEN, STV_PROTECTED
         };
         let mut st_shndx = self.shndx;
         let mut st_info = 0;
@@ -136,12 +136,11 @@ impl<'a> SymbolBuilder<'a> {
             flag << 4
         }
 
-        // TODO put these into goblin
         fn vis_stother_flags(v: Visibility) -> u8 {
             match v {
-                Visibility::Default => 0,
-                Visibility::Hidden => 2,
-                Visibility::Protected => 3,
+                Visibility::Default => STV_DEFAULT,
+                Visibility::Hidden => STV_HIDDEN,
+                Visibility::Protected => STV_PROTECTED,
             }
         }
 
