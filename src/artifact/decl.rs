@@ -36,7 +36,8 @@ pub enum Scope {
     /// Available only inside the defining component
     Local,
     /// Available to all modules, but only selected if a Global
-    /// definition is not found
+    /// definition is not found. No conflict if there are multiple
+    /// weak symbols.
     Weak,
 }
 
@@ -67,7 +68,7 @@ macro_rules! scope_methods {
     pub fn set_scope(&mut self, scope: Scope) {
         self.scope = scope;
     }
-    /// Check if scope is `Scope::Global`
+    /// Check if scope is `Scope::Global`. False if set to Local or Weak.
     pub fn is_global(&self) -> bool {
         self.scope == Scope::Global
     }
@@ -120,7 +121,7 @@ macro_rules! visibility_methods {
 pub enum DataType {
     /// Ordinary raw bytes
     Bytes,
-    /// 0-terminated ascii string
+    /// 0-terminated C-style string.
     String,
 }
 
@@ -144,7 +145,8 @@ macro_rules! datatype_methods {
 
 macro_rules! align_methods {
     () => {
-    /// Build alignment
+    /// Build alignment. Size is in bytes. If None, a default is chosen
+    /// in the backend.
     pub fn with_align(mut self, align: Option<usize>) -> Self {
         self.align = align;
         self
