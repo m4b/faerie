@@ -6,7 +6,10 @@
 #![allow(dead_code)]
 
 use crate::{
-    artifact::{self, Artifact, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc},
+    artifact::{
+        self, Artifact, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
+        Visibility,
+    },
     target::make_ctx,
     Ctx,
 };
@@ -61,12 +64,10 @@ impl From<Architecture> for MachineTag {
 }
 
 /// The kind of symbol this is; used in [SymbolBuilder](struct.SymbolBuilder.html)
-enum SymbolType {
-    /// A function
-    Function,
-    /// A data object
-    Object,
-    /// An impor
+enum SymbolType<'a> {
+    /// From a definition
+    Decl(&'a DefinedDecl),
+    /// An import
     Import,
     /// A section reference
     Section,
@@ -77,31 +78,29 @@ enum SymbolType {
 }
 
 /// A builder for creating a 32/64 bit ELF symbol
-struct SymbolBuilder {
+struct SymbolBuilder<'a> {
     name_offset: usize,
-    global: bool,
     size: u64,
-    typ: SymbolType,
+    typ: SymbolType<'a>,
+    shndx: usize,
 }
 
-impl SymbolBuilder {
+impl<'a> SymbolBuilder<'a> {
     /// Create a new symbol with `typ`
-    pub fn new(typ: SymbolType) -> Self {
+    pub fn new(typ: SymbolType<'a>) -> Self {
         SymbolBuilder {
-            global: false,
             name_offset: 0,
             typ,
             size: 0,
+            shndx: 0,
         }
+    }
+    pub fn from_decl(decl: &'a DefinedDecl) -> Self {
+        SymbolBuilder::new(SymbolType::Decl(decl))
     }
     /// Set the size of this symbol; for functions, it should be the routines size in bytes
     pub fn size(mut self, size: usize) -> Self {
         self.size = size as u64;
-        self
-    }
-    /// Is this symbol local in scope?
-    pub fn local(mut self, local: bool) -> Self {
-        self.global = !local;
         self
     }
     /// Set the symbol name as a byte offset into the corresponding strtab
@@ -109,27 +108,58 @@ impl SymbolBuilder {
         self.name_offset = name_offset;
         self
     }
+    /// Set the section index
+    pub fn section_index(mut self, shndx: usize) -> Self {
+        // Underlying representation is only 16 bits. Catch this early!
+        debug_assert!(shndx < u16::max_value() as usize);
+        self.shndx = shndx;
+        self
+    }
     /// Finalize and create the symbol
     pub fn create(self) -> Symbol {
         use goblin::elf::section_header::SHN_ABS;
         use goblin::elf::sym::{
-            STB_GLOBAL, STB_LOCAL, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT, STT_SECTION,
+            STB_GLOBAL, STB_LOCAL, STB_WEAK, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT,
+            STT_SECTION, STV_DEFAULT, STV_HIDDEN, STV_PROTECTED,
         };
-        let mut st_shndx = 0;
+        let mut st_shndx = self.shndx;
         let mut st_info = 0;
+        let mut st_other = 0;
         let st_value = 0;
-        match self.typ {
-            SymbolType::Function => {
-                st_info |= STT_FUNC;
+
+        fn scope_stb_flags(s: Scope) -> u8 {
+            let flag = match s {
+                Scope::Local => STB_LOCAL,
+                Scope::Global => STB_GLOBAL,
+                Scope::Weak => STB_WEAK,
+            };
+            flag << 4
+        }
+
+        fn vis_stother_flags(v: Visibility) -> u8 {
+            match v {
+                Visibility::Default => STV_DEFAULT,
+                Visibility::Hidden => STV_HIDDEN,
+                Visibility::Protected => STV_PROTECTED,
             }
-            SymbolType::Object => {
+        }
+
+        match self.typ {
+            SymbolType::Decl(DefinedDecl::Function(d)) => {
+                st_info |= STT_FUNC;
+                st_info |= scope_stb_flags(d.get_scope());
+                st_other |= vis_stother_flags(d.get_visibility());
+            }
+            SymbolType::Decl(DefinedDecl::Data(d)) => {
                 st_info |= STT_OBJECT;
+                st_info |= scope_stb_flags(d.get_scope());
+                st_other |= vis_stother_flags(d.get_visibility());
             }
             SymbolType::Import => {
                 st_info = STT_NOTYPE;
                 st_info |= STB_GLOBAL << 4;
             }
-            SymbolType::Section => {
+            SymbolType::Decl(DefinedDecl::DebugSection(_)) | SymbolType::Section => {
                 st_info |= STT_SECTION;
                 st_info |= STB_LOCAL << 4;
             }
@@ -140,14 +170,9 @@ impl SymbolBuilder {
             }
             SymbolType::None => st_info = STT_NOTYPE,
         }
-        if self.global {
-            st_info |= STB_GLOBAL << 4;
-        } else {
-            st_info |= STB_LOCAL << 4;
-        }
         Symbol {
             st_name: self.name_offset,
-            st_other: 0,
+            st_other,
             st_size: self.size,
             st_info,
             st_shndx,
@@ -175,6 +200,7 @@ struct SectionBuilder {
     alloc: bool,
     size: u64,
     name_offset: usize,
+    align: Option<usize>,
 }
 
 impl SectionBuilder {
@@ -187,6 +213,7 @@ impl SectionBuilder {
             alloc: false,
             name_offset: 0,
             size,
+            align: None,
         }
     }
     /// Make this section executable
@@ -202,6 +229,11 @@ impl SectionBuilder {
     /// Make this section writable
     pub fn writable(mut self, writable: bool) -> Self {
         self.write = writable;
+        self
+    }
+    /// Specify section alignment
+    pub fn align(mut self, align: Option<usize>) -> Self {
+        self.align = align;
         self
     }
 
@@ -231,36 +263,29 @@ impl SectionBuilder {
         if self.alloc {
             shdr.sh_flags |= SHF_ALLOC as u64
         }
+
+        let align = if let Some(align) = self.align {
+            align as u64
+        } else if self.exec {
+            0x10
+        } else if self.write {
+            0x8
+        } else {
+            1
+        };
+
         match self.typ {
             SectionType::Bits => {
-                shdr.sh_addralign = if self.exec {
-                    0x10
-                } else if self.write {
-                    0x8
-                } else {
-                    1
-                };
-                shdr.sh_type = SHT_PROGBITS
+                shdr.sh_addralign = align;
+                shdr.sh_type = SHT_PROGBITS;
             }
             SectionType::String => {
-                shdr.sh_addralign = if self.exec {
-                    0x10
-                } else if self.write {
-                    0x8
-                } else {
-                    1
-                };
+                shdr.sh_addralign = align;
                 shdr.sh_type = SHT_PROGBITS;
                 shdr.sh_flags |= (SHF_MERGE | SHF_STRINGS) as u64;
             }
             SectionType::Data => {
-                shdr.sh_addralign = if self.exec {
-                    0x10
-                } else if self.write {
-                    0x8
-                } else {
-                    1
-                };
+                shdr.sh_addralign = align;
                 shdr.sh_type = SHT_PROGBITS;
             }
             SectionType::StrTab => {
@@ -444,66 +469,75 @@ impl<'a> Elf<'a> {
         }
     }
     pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::DefinedDecl) {
-        // we need this because sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
+        // sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
         if !decl.is_global() {
             self.nlocals += 1;
         }
-        // FIXME: this is kind of hacky?
-        let segment_name = if let DefinedDecl::Function { .. } = decl {
-            "text"
-        } else {
-            // we'd add ro here once the prop supports that
-            "data"
+        let def_size = data.len();
+
+        let section_name = match decl {
+            DefinedDecl::Function(_) => format!(".text.{}", name),
+            DefinedDecl::Data(d) => format!(
+                ".{}.{}",
+                if d.is_writable() { "data" } else { "rodata" },
+                name
+            ),
+            DefinedDecl::DebugSection(_) => name.to_owned(),
         };
-        let section_name = format!(".{}.{}", segment_name, name);
-        // store the size of this code
-        let size = data.len();
 
-        // now we build the section a la LLVM "function sections"
-        // FIXME: probably add padding alignment
-        let section = {
-            let stype = match decl {
-                DefinedDecl::Function { .. } => SectionType::Bits,
-                DefinedDecl::CString { .. } => SectionType::String,
-                _ => SectionType::Data,
-            };
-
-            SectionBuilder::new(size as u64)
-                .section_type(stype)
+        let section = match decl {
+            DefinedDecl::Function(d) => SectionBuilder::new(def_size as u64)
+                .section_type(SectionType::Bits)
                 .alloc()
-                .writable(decl.is_writable())
-                .exec(decl.is_function())
+                .writable(false)
+                .exec(true)
+                .align(d.get_align()),
+            DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
+                .section_type(match d.get_datatype() {
+                    DataType::Bytes => SectionType::Data,
+                    DataType::String => SectionType::String,
+                })
+                .alloc()
+                .writable(d.is_writable())
+                .exec(false)
+                .align(d.get_align()),
+            DefinedDecl::DebugSection(d) => SectionBuilder::new(def_size as u64)
+                .section_type(
+                    // TODO: this behavior should be deprecated, but we need to warn users!
+                    if name == ".debug_str" || name == ".debug_line_str" {
+                        SectionType::String
+                    } else {
+                        match d.get_datatype() {
+                            DataType::Bytes => SectionType::Bits,
+                            DataType::String => SectionType::String,
+                        }
+                    },
+                )
+                .align(d.get_align()),
         };
+
         let shndx = self.add_progbits(section_name, section, data);
 
-        // can do prefix optimization here actually, because .text.*
-        let (idx, offset) = self.new_string(name.to_string());
-        debug!(
-            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
-            idx, offset, self.sizeof_strtab
-        );
-        // build symbol based on this _and_ the properties of the definition
-        let mut symbol = SymbolBuilder::new(if let DefinedDecl::Function { .. } = decl {
-            SymbolType::Function
-        } else {
-            SymbolType::Object
-        })
-        .size(size)
-        .name_offset(offset)
-        .local(!decl.is_global())
-        .create();
-        symbol.st_shndx = shndx;
-        // insert it into our symbol table
-        self.symbols.insert(idx, symbol);
-    }
-    pub fn add_section(&mut self, name: &str, data: &'a [u8], _decl: &artifact::DefinedDecl) {
-        let stype = if name == ".debug_str" || name == ".debug_line_str" {
-            SectionType::String
-        } else {
-            SectionType::Bits
-        };
-        let section = SectionBuilder::new(data.len() as u64).section_type(stype);
-        self.add_progbits(name.to_string(), section, data);
+        match decl {
+            DefinedDecl::Function(_) | DefinedDecl::Data(_) => {
+                let (idx, offset) = self.new_string(name.to_string());
+                debug!(
+                    "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+                    idx, offset, self.sizeof_strtab
+                );
+                // build symbol based on this _and_ the properties of the definition
+                let symbol = SymbolBuilder::from_decl(decl)
+                    .size(def_size)
+                    .name_offset(offset)
+                    .section_index(shndx)
+                    .create();
+                // insert it into our symbol table
+                self.symbols.insert(idx, symbol);
+            }
+            DefinedDecl::DebugSection(_) => {
+                // No symbols in debug sections, yet...
+            }
+        }
     }
     /// Create a progbits section (and its section symbol), and return the section index.
     fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
@@ -516,8 +550,9 @@ impl<'a> Elf<'a> {
         let size = data.len();
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab
-        let mut section_symbol = SymbolBuilder::new(SymbolType::Section).create();
-        section_symbol.st_shndx = shndx;
+        let section_symbol = SymbolBuilder::new(SymbolType::Section)
+            .section_index(shndx)
+            .create();
 
         let mut section = section.name_offset(offset).create(&self.ctx);
         // the offset is the head of how many program bits we've added
@@ -601,9 +636,6 @@ impl<'a> Elf<'a> {
                             Decl::Defined(DefinedDecl::Function { .. })
                             | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
                             Decl::Defined(DefinedDecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
-                            Decl::Defined(DefinedDecl::CString { .. }) => {
-                                (reloc::R_X86_64_PC32, -4)
-                            }
                             Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
                             _ => panic!("unsupported relocation {:?}", l),
                         }
@@ -851,11 +883,7 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        if let DefinedDecl::DebugSection { .. } = def.decl {
-            elf.add_section(def.name, def.data, def.decl);
-        } else {
-            elf.add_definition(def.name, def.data, def.decl);
-        }
+        elf.add_definition(def.name, def.data, def.decl);
     }
     for (ref import, ref kind) in artifact.imports() {
         debug!("Import: {:?} -> {:?}", import, kind);

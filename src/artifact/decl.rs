@@ -1,5 +1,4 @@
 use crate::artifact::ArtifactError;
-use failure::Error;
 
 /// The kind of declaration this is
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -30,14 +29,146 @@ impl ImportKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Linker binding scope of a definition
+pub enum Scope {
+    /// Available to all components
+    Global,
+    /// Available only inside the defining component
+    Local,
+    /// Available to all modules, but only selected if a Global
+    /// definition is not found. No conflict if there are multiple
+    /// weak symbols.
+    Weak,
+}
+
+macro_rules! scope_methods {
+    () => {
+    /// Set scope to global
+    pub fn global(self) -> Self {
+        self.with_scope(Scope::Global)
+    }
+    /// Set scope to local
+    pub fn local(self) -> Self {
+        self.with_scope(Scope::Local)
+    }
+    /// Set scope to weak
+    pub fn weak(self) -> Self {
+        self.with_scope(Scope::Weak)
+    }
+    /// Builder for scope
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
+        self
+    }
+    /// Gst scope
+    pub fn get_scope(&self) -> Scope {
+        self.scope
+    }
+    /// Set scope
+    pub fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+    /// Check if scope is `Scope::Global`. False if set to Local or Weak.
+    pub fn is_global(&self) -> bool {
+        self.scope == Scope::Global
+    }
+}}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Linker visibility of a definition
+pub enum Visibility {
+    /// Visibility determined by the symbol's `Scope`.
+    Default,
+    /// Visible in other components, but cannot be preempted. References to the symbol must be
+    /// resolved to this definition in that component, even if another definition would interpose
+    /// by the default rules.
+    Protected,
+    /// Not visible to other components, plus the constraints provided by `Protected`.
+    Hidden,
+}
+
+macro_rules! visibility_methods {
+    () => {
+    /// Set visibility to default
+    pub fn default_visibility(self) -> Self {
+        self.with_visibility(Visibility::Default)
+    }
+    /// Set visibility to protected
+    pub fn protected(self) -> Self {
+        self.with_visibility(Visibility::Protected)
+    }
+    /// Set visibility to hidden
+    pub fn hidden(self) -> Self {
+        self.with_visibility(Visibility::Hidden)
+    }
+    /// Builder for visibility
+    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility =visibility;
+        self
+    }
+    /// Get visibility
+    pub fn get_visibility(&self) -> Visibility {
+        self.visibility
+    }
+    /// Set visibility
+    pub fn set_visibility(&mut self, visibility: Visibility) {
+        self.visibility = visibility;
+    }
+}}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Type of data declared
+pub enum DataType {
+    /// Ordinary raw bytes
+    Bytes,
+    /// 0-terminated C-style string.
+    String,
+}
+
+macro_rules! datatype_methods {
+    () => {
+    /// Build datatype
+    pub fn with_datatype(mut self, datatype: DataType) -> Self {
+        self.datatype = datatype;
+        self
+    }
+    /// Set datatype
+    pub fn set_datatype(&mut self, datatype: DataType) {
+        self.datatype = datatype;
+    }
+    /// Get datatype
+    pub fn get_datatype(&self) -> DataType {
+        self.datatype
+    }
+    }
+}
+
+macro_rules! align_methods {
+    () => {
+    /// Build alignment. Size is in bytes. If None, a default is chosen
+    /// in the backend.
+    pub fn with_align(mut self, align: Option<usize>) -> Self {
+        self.align = align;
+        self
+    }
+    /// Set alignment
+    pub fn set_align(&mut self, align: Option<usize>) {
+        self.align = align;
+    }
+    /// Get alignment
+    pub fn get_align(&self) -> Option<usize> {
+        self.align
+    }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A declaration that is defined inside this artifact
 pub enum DefinedDecl {
     /// A function defined in this artifact
     Function(FunctionDecl),
     /// A data object defined in this artifact
     Data(DataDecl),
-    /// A null-terminated string object defined in this artifact
-    CString(CStringDecl),
     /// A DWARF debug section defined in this artifact
     DebugSection(DebugSectionDecl),
 }
@@ -59,14 +190,6 @@ impl DefinedDecl {
         }
     }
 
-    /// Accessor to determine whether variant is CString
-    pub fn is_cstring(&self) -> bool {
-        match self {
-            DefinedDecl::CString { .. } => true,
-            _ => false,
-        }
-    }
-
     /// Accessor to determine whether variant is DebugSection
     pub fn is_debug_section(&self) -> bool {
         match self {
@@ -80,7 +203,6 @@ impl DefinedDecl {
         match self {
             DefinedDecl::Function(a) => a.is_global(),
             DefinedDecl::Data(a) => a.is_global(),
-            DefinedDecl::CString(a) => a.is_global(),
             DefinedDecl::DebugSection(a) => a.is_global(),
         }
     }
@@ -89,9 +211,7 @@ impl DefinedDecl {
     pub fn is_writable(&self) -> bool {
         match self {
             DefinedDecl::Data(a) => a.is_writable(),
-            DefinedDecl::Function(_) | DefinedDecl::CString(_) | DefinedDecl::DebugSection(_) => {
-                false
-            }
+            DefinedDecl::Function(_) | DefinedDecl::DebugSection(_) => false,
         }
     }
 }
@@ -114,8 +234,8 @@ impl Decl {
         DataDecl::default()
     }
     /// A null-terminated string object defined in this artifact
-    pub fn cstring() -> CStringDecl {
-        CStringDecl::default()
+    pub fn cstring() -> DataDecl {
+        DataDecl::default().with_datatype(DataType::String)
     }
     /// A DWARF debug section defined in this artifact
     pub fn debug_section() -> DebugSectionDecl {
@@ -135,7 +255,7 @@ impl Decl {
     /// 4. Anything else is a [IncompatibleDeclaration](enum.ArtifactError.html#variant.IncompatibleDeclaration) error!
     // ref https://github.com/m4b/faerie/issues/24
     // ref https://github.com/m4b/faerie/issues/18
-    pub fn absorb(&mut self, other: Self) -> Result<(), Error> {
+    pub fn absorb(&mut self, other: Self) -> Result<(), ArtifactError> {
         // FIXME: i can't think of a way offhand to not clone here, without unusual contortions
         match self.clone() {
             Decl::Import(ImportKind::Data) => {
@@ -264,30 +384,25 @@ impl Into<Decl> for DataImportDecl {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for function declarations
 pub struct FunctionDecl {
-    global: bool,
+    scope: Scope,
+    visibility: Visibility,
+    align: Option<usize>,
 }
 
 impl Default for FunctionDecl {
     fn default() -> Self {
-        FunctionDecl { global: false }
+        FunctionDecl {
+            scope: Scope::Local,
+            visibility: Visibility::Default,
+            align: None,
+        }
     }
 }
 
 impl FunctionDecl {
-    /// Set binding to global
-    pub fn global(mut self) -> Self {
-        self.global = true;
-        self
-    }
-    /// Set binding to local
-    pub fn local(mut self) -> Self {
-        self.global = false;
-        self
-    }
-    /// Accessor for binding
-    pub fn is_global(&self) -> bool {
-        self.global
-    }
+    scope_methods!();
+    visibility_methods!();
+    align_methods!();
 }
 
 impl Into<Decl> for FunctionDecl {
@@ -299,43 +414,46 @@ impl Into<Decl> for FunctionDecl {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for data declarations
 pub struct DataDecl {
-    global: bool,
+    scope: Scope,
+    visibility: Visibility,
     writable: bool,
+    datatype: DataType,
+    align: Option<usize>,
 }
 
 impl Default for DataDecl {
     fn default() -> Self {
         DataDecl {
-            global: false,
+            scope: Scope::Local,
+            visibility: Visibility::Default,
             writable: false,
+            datatype: DataType::Bytes,
+            align: None,
         }
     }
 }
 
 impl DataDecl {
-    /// Set binding to global
-    pub fn global(mut self) -> Self {
-        self.global = true;
+    scope_methods!();
+    visibility_methods!();
+    datatype_methods!();
+    align_methods!();
+    /// Builder for writability
+    pub fn with_writable(mut self, writable: bool) -> Self {
+        self.writable = writable;
         self
-    }
-    /// Set binding to local
-    pub fn local(mut self) -> Self {
-        self.global = false;
-        self
-    }
-    /// Accessor for binding
-    pub fn is_global(&self) -> bool {
-        self.global
     }
     /// Set mutability to writable
-    pub fn writable(mut self) -> Self {
-        self.writable = true;
-        self
+    pub fn writable(self) -> Self {
+        self.with_writable(true)
     }
     /// Set mutability to read-only
-    pub fn read_only(mut self) -> Self {
-        self.writable = false;
-        self
+    pub fn read_only(self) -> Self {
+        self.with_writable(false)
+    }
+    /// Setter for mutability
+    pub fn set_writable(&mut self, writable: bool) {
+        self.writable = writable;
     }
     /// Accessor for mutability
     pub fn is_writable(&self) -> bool {
@@ -350,45 +468,15 @@ impl Into<Decl> for DataDecl {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-/// Builder for a CString (0-terminated character sequence) declaration
-pub struct CStringDecl {
-    global: bool,
-}
-
-impl Default for CStringDecl {
-    fn default() -> Self {
-        CStringDecl { global: false }
-    }
-}
-
-impl CStringDecl {
-    /// Set binding to global
-    pub fn global(mut self) -> Self {
-        self.global = true;
-        self
-    }
-    /// Set binding to local
-    pub fn local(mut self) -> Self {
-        self.global = false;
-        self
-    }
-    /// Accessor for binding
-    pub fn is_global(&self) -> bool {
-        self.global
-    }
-}
-
-impl Into<Decl> for CStringDecl {
-    fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::CString(self))
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Builder for a debug section declaration
-pub struct DebugSectionDecl {}
+pub struct DebugSectionDecl {
+    datatype: DataType,
+    align: Option<usize>,
+}
 
 impl DebugSectionDecl {
+    datatype_methods!();
+    align_methods!();
     /// Debug sections are never global, but we have an accessor
     /// for symmetry with other section declarations
     pub fn is_global(&self) -> bool {
@@ -398,7 +486,10 @@ impl DebugSectionDecl {
 
 impl Default for DebugSectionDecl {
     fn default() -> Self {
-        DebugSectionDecl {}
+        DebugSectionDecl {
+            datatype: DataType::Bytes,
+            align: None,
+        }
     }
 }
 

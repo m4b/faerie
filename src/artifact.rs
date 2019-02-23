@@ -12,7 +12,7 @@ use std::io::Write;
 use crate::{elf, mach};
 
 pub(crate) mod decl;
-pub use decl::{Decl, DefinedDecl, ImportKind};
+pub use crate::artifact::decl::{DataType, Decl, DefinedDecl, ImportKind, Scope, Visibility};
 
 /// A blob of binary bytes, representing a function body, or data object
 pub type Data = Vec<u8>;
@@ -282,7 +282,11 @@ impl Artifact {
     }
     /// Declare a new symbolic reference, with the given `decl`.
     /// **Note**: All declarations _must_ precede their definitions.
-    pub fn declare<T: AsRef<str>, D: Into<Decl>>(&mut self, name: T, decl: D) -> Result<(), Error> {
+    pub fn declare<T: AsRef<str>, D: Into<Decl>>(
+        &mut self,
+        name: T,
+        decl: D,
+    ) -> Result<(), ArtifactError> {
         let decl = decl.into();
         let decl_name = self.strings.get_or_intern(name.as_ref());
         let previous_was_import;
