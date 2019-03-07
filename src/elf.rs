@@ -469,10 +469,6 @@ impl<'a> Elf<'a> {
         }
     }
     pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::DefinedDecl) {
-        // sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
-        if !decl.is_global() {
-            self.nlocals += 1;
-        }
         let def_size = data.len();
 
         let section_name = match decl {
@@ -533,6 +529,12 @@ impl<'a> Elf<'a> {
                     .create();
                 // insert it into our symbol table
                 self.symbols.insert(idx, symbol);
+                // sh_info requires nsections + nlocals to add as delimiter; see the associated FunFact
+                // nonglobals go into the symbol table first (per iteration through definitions in
+                // caller)
+                if !decl.is_global() {
+                    self.nlocals += 1;
+                }
             }
             DefinedDecl::DebugSection(_) => {
                 // No symbols in debug sections, yet...
