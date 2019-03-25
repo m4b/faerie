@@ -60,7 +60,7 @@ macro_rules! scope_methods {
         self.scope = scope;
         self
     }
-    /// Gst scope
+    /// Get scope
     pub fn get_scope(&self) -> Scope {
         self.scope
     }
