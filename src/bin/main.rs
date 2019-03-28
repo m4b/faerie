@@ -10,7 +10,7 @@ use failure::Error;
 use structopt::StructOpt;
 use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor};
 
-use faerie::{ArtifactBuilder, Decl, Link, Reloc};
+use faerie::{ArtifactBuilder, Decl, Link, Reloc, SectionKind};
 use std::env;
 use std::fs::File;
 use std::path::Path;
@@ -209,9 +209,9 @@ fn deadbeef (args: Args) -> Result<(), Error> {
 
     if args.dwarf {
         // DWARF sections
-        obj.declare(".debug_abbrev", Decl::debug_section())?;
-        obj.declare(".debug_info", Decl::debug_section())?;
-        obj.declare(".debug_str", Decl::debug_section())?;
+        obj.declare(".debug_abbrev", Decl::section(SectionKind::Debug))?;
+        obj.declare(".debug_info", Decl::section(SectionKind::Debug))?;
+        obj.declare(".debug_str", Decl::section(SectionKind::Debug))?;
 
         obj.define(".debug_str",
             concat![

@@ -162,6 +162,32 @@ macro_rules! align_methods {
     }
 }
 
+macro_rules! writable_methods {
+    () => {
+    /// Builder for writability
+    pub fn with_writable(mut self, writable: bool) -> Self {
+        self.writable = writable;
+        self
+    }
+    /// Set mutability to writable
+    pub fn writable(self) -> Self {
+        self.with_writable(true)
+    }
+    /// Set mutability to read-only
+    pub fn read_only(self) -> Self {
+        self.with_writable(false)
+    }
+    /// Setter for mutability
+    pub fn set_writable(&mut self, writable: bool) {
+        self.writable = writable;
+    }
+    /// Accessor for mutability
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A declaration that is defined inside this artifact
 pub enum DefinedDecl {
@@ -170,7 +196,7 @@ pub enum DefinedDecl {
     /// A data object defined in this artifact
     Data(DataDecl),
     /// A DWARF debug section defined in this artifact
-    DebugSection(DebugSectionDecl),
+    Section(SectionDecl),
 }
 
 impl DefinedDecl {
@@ -190,10 +216,10 @@ impl DefinedDecl {
         }
     }
 
-    /// Accessor to determine whether variant is DebugSection
-    pub fn is_debug_section(&self) -> bool {
+    /// Accessor to determine whether variant is Section
+    pub fn is_section(&self) -> bool {
         match self {
-            DefinedDecl::DebugSection { .. } => true,
+            DefinedDecl::Section(_) => true,
             _ => false,
         }
     }
@@ -203,7 +229,7 @@ impl DefinedDecl {
         match self {
             DefinedDecl::Function(a) => a.is_global(),
             DefinedDecl::Data(a) => a.is_global(),
-            DefinedDecl::DebugSection(a) => a.is_global(),
+            DefinedDecl::Section(a) => a.is_global(),
         }
     }
 
@@ -211,7 +237,8 @@ impl DefinedDecl {
     pub fn is_writable(&self) -> bool {
         match self {
             DefinedDecl::Data(a) => a.is_writable(),
-            DefinedDecl::Function(_) | DefinedDecl::DebugSection(_) => false,
+            DefinedDecl::Function(_) => false,
+            DefinedDecl::Section(a) => a.is_writable(),
         }
     }
 }
@@ -237,9 +264,9 @@ impl Decl {
     pub fn cstring() -> DataDecl {
         DataDecl::default().with_datatype(DataType::String)
     }
-    /// A DWARF debug section defined in this artifact
-    pub fn debug_section() -> DebugSectionDecl {
-        DebugSectionDecl::default()
+    /// A section defined in this artifact
+    pub fn section(kind: SectionKind) -> SectionDecl {
+        SectionDecl::new(kind)
     }
 
     /// If it is compatible, absorb the new declaration (`other`) into the old (`self`); otherwise returns an error.
@@ -343,7 +370,7 @@ impl Decl {
     /// Is this a section?
     pub fn is_section(&self) -> bool {
         match *self {
-            Decl::Defined(DefinedDecl::DebugSection { .. }) => true,
+            Decl::Defined(DefinedDecl::Section { .. }) => true,
             _ => false,
         }
     }
@@ -438,27 +465,7 @@ impl DataDecl {
     visibility_methods!();
     datatype_methods!();
     align_methods!();
-    /// Builder for writability
-    pub fn with_writable(mut self, writable: bool) -> Self {
-        self.writable = writable;
-        self
-    }
-    /// Set mutability to writable
-    pub fn writable(self) -> Self {
-        self.with_writable(true)
-    }
-    /// Set mutability to read-only
-    pub fn read_only(self) -> Self {
-        self.with_writable(false)
-    }
-    /// Setter for mutability
-    pub fn set_writable(&mut self, writable: bool) {
-        self.writable = writable;
-    }
-    /// Accessor for mutability
-    pub fn is_writable(&self) -> bool {
-        self.writable
-    }
+    writable_methods!();
 }
 
 impl Into<Decl> for DataDecl {
@@ -468,33 +475,56 @@ impl Into<Decl> for DataDecl {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-/// Builder for a debug section declaration
-pub struct DebugSectionDecl {
+/// The kind of this section
+pub enum SectionKind {
+    /// Mutable data
+    Data,
+
+    /// DWARF debug info
+    Debug,
+
+    /// Code or read-only data
+    Text,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Builder for a section declaration
+pub struct SectionDecl {
+    kind: SectionKind,
+    writable: bool,
     datatype: DataType,
     align: Option<usize>,
 }
 
-impl DebugSectionDecl {
+impl SectionDecl {
     datatype_methods!();
     align_methods!();
-    /// Debug sections are never global, but we have an accessor
-    /// for symmetry with other section declarations
-    pub fn is_global(&self) -> bool {
-        false
-    }
-}
+    writable_methods!();
 
-impl Default for DebugSectionDecl {
-    fn default() -> Self {
-        DebugSectionDecl {
+    /// Create a `SectionDecl` of the given kind
+    pub fn new(kind: SectionKind) -> Self {
+        SectionDecl {
+            kind,
+            writable: false,
             datatype: DataType::Bytes,
             align: None,
         }
     }
+
+    /// Sections are never global, but we have an accessor
+    /// for symmetry with other section declarations
+    pub fn is_global(&self) -> bool {
+        false
+    }
+
+    /// Get the kind for this `SectionDecl`
+    pub fn kind(&self) -> SectionKind {
+        self.kind
+    }
 }
 
-impl Into<Decl> for DebugSectionDecl {
+impl Into<Decl> for SectionDecl {
     fn into(self) -> Decl {
-        Decl::Defined(DefinedDecl::DebugSection(self))
+        Decl::Defined(DefinedDecl::Section(self))
     }
 }
