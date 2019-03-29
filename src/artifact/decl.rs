@@ -195,7 +195,7 @@ pub enum DefinedDecl {
     Function(FunctionDecl),
     /// A data object defined in this artifact
     Data(DataDecl),
-    /// A DWARF debug section defined in this artifact
+    /// A section defined in this artifact
     Section(SectionDecl),
 }
 

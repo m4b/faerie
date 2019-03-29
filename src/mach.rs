@@ -461,13 +461,11 @@ impl SegmentBuilder {
         def: &Definition,
     ) {
         let segment_name = match def.decl {
-            DefinedDecl::Section(s) => {
-                match s.kind() {
-                    SectionKind::Data => "__DATA",
-                    SectionKind::Debug => "__DWARF",
-                    SectionKind::Text => "__TEXT",
-                }
-            }
+            DefinedDecl::Section(s) => match s.kind() {
+                SectionKind::Data => "__DATA",
+                SectionKind::Debug => "__DWARF",
+                SectionKind::Text => "__TEXT",
+            },
             _ => unreachable!("in build_custom_section: def.decl != Section"),
         };
 
@@ -800,12 +798,14 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                 // e.g., global static data references, are constructed from Data -> Data links
                 match (link.from.decl, link.to.decl) {
                     (Decl::Defined(DefinedDecl::Section(s)), _)
-                        if s.kind() == SectionKind::Debug => {
+                        if s.kind() == SectionKind::Debug =>
+                    {
                         panic!("must use Reloc::Debug for debug section links")
                     }
                     // only debug sections should link to debug sections
                     (_, Decl::Defined(DefinedDecl::Section(s)))
-                        if s.kind() == SectionKind::Debug => {
+                        if s.kind() == SectionKind::Debug =>
+                    {
                         panic!("invalid DebugSection link")
                     }
 
