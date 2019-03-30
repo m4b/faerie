@@ -159,6 +159,10 @@ fn run (args: Args) -> Result<(), Error> {
     // .data static references need to be zero'd out explicitly for now.
     obj.define("STATIC_REF", vec![0; 8])?;
 
+    // define a custom section
+    obj.declare(".faerie", Decl::section(SectionKind::Data))?;
+    obj.define(".faerie", b"some data".to_vec())?;
+
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
     // -- main relocations --
