@@ -88,6 +88,7 @@ fn run (args: Args) -> Result<(), Error> {
         ("DEADBEEF", Decl::data_import().into()),
         ("STATIC", Decl::data().global().writable().into()),
         ("STATIC_REF", Decl::data().global().writable().into()),
+        ("GLOBAL_ARR", Decl::data().global().into()),
         ("printf", Decl::function_import().into()),
     ];
     obj.declarations(declarations.into_iter())?;
@@ -123,6 +124,7 @@ fn run (args: Args) -> Result<(), Error> {
     // 48 8d 3d 00 00 00 00	lea    0x0(%rip),%rdi        # 0x1d <main+29> will be: "deadbeef: 0x%x - %d\n"
     // 48 8b 0d 00 00 00 00	mov    0x0(%rip),%rcx        # 0x24 <main+36>
     // 8b 11	mov    (%rcx),%edx
+    // 48 8b 0d 00 00 00 00 mov    0x0(%rip),%rcx        # global_arr
     // 89 c6	mov    %eax,%esi
     // b0 00	mov    $0x0,%al
     // e8 00 00 00 00	callq  0x2f <main+47> # printf
@@ -143,6 +145,7 @@ fn run (args: Args) -> Result<(), Error> {
              0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00,
              0x48, 0x8b, 0x0d, 0x00, 0x00, 0x00, 0x00,
              0x8b, 0x11,
+             0x48, 0x8b, 0x0d, 0x00, 0x00, 0x00, 0x00,
              0x89, 0xc6,
              0xb0, 0x00,
              0xe8, 0x00, 0x00, 0x00, 0x00,
@@ -154,8 +157,9 @@ fn run (args: Args) -> Result<(), Error> {
              0xc3,
         ])?;
     // define static data
-    obj.define("str.1", b"deadbeef: 0x%x - 0x%x\n\0".to_vec())?;
+    obj.define("str.1", b"deadbeef: 0x%x - 0x%x - %d\n\0".to_vec())?;
     obj.define("STATIC",     [0xbe, 0xba, 0xfe, 0xca].to_vec())?;
+    obj.define("GLOBAL_ARR", [41, 00, 00, 00, 42, 00, 00, 00].to_vec())?;
     // .data static references need to be zero'd out explicitly for now.
     obj.define("STATIC_REF", vec![0; 8])?;
 
@@ -165,7 +169,10 @@ fn run (args: Args) -> Result<(), Error> {
     obj.link(Link { from: "main", to: "deadbeef", at: 0x15 })?;
     obj.link(Link { from: "main", to: "str.1", at: 0x1c })?;
     obj.link(Link { from: "main", to: "STATIC_REF", at: 0x23 })?;
-    obj.link(Link { from: "main", to: "printf", at: 0x2e })?;
+    // GLOBAL_ARR is an array of (4-byte) integers. We create a relocation
+    // pointing to the second entry in the array via an addend of 4 bytes
+    obj.link_with(Link { from: "main", to: "GLOBAL_ARR", at: 0x2c }, Reloc::Data { addend: 4 } )?;
+    obj.link(Link { from: "main", to: "printf", at: 0x35 })?;
 
     // -- deadbeef relocations --
     obj.link(Link { from: "deadbeef", to: "DEADBEEF", at: 0x7 })?;

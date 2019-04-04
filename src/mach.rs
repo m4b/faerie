@@ -840,6 +840,10 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                 }
                 continue;
             }
+            Reloc::Data { .. } => {
+                // TODO: Implement this
+                unimplemented!()
+            }
         };
         match (symtab.offset(link.from.name), symtab.index(link.to.name)) {
             (Some(base_offset), Some(to_symbol_index)) => {
