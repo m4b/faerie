@@ -162,32 +162,6 @@ macro_rules! align_methods {
     }
 }
 
-macro_rules! writable_methods {
-    () => {
-    /// Builder for writability
-    pub fn with_writable(mut self, writable: bool) -> Self {
-        self.writable = writable;
-        self
-    }
-    /// Set mutability to writable
-    pub fn writable(self) -> Self {
-        self.with_writable(true)
-    }
-    /// Set mutability to read-only
-    pub fn read_only(self) -> Self {
-        self.with_writable(false)
-    }
-    /// Setter for mutability
-    pub fn set_writable(&mut self, writable: bool) {
-        self.writable = writable;
-    }
-    /// Accessor for mutability
-    pub fn is_writable(&self) -> bool {
-        self.writable
-    }
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A declaration that is defined inside this artifact
 pub enum DefinedDecl {
@@ -465,7 +439,28 @@ impl DataDecl {
     visibility_methods!();
     datatype_methods!();
     align_methods!();
-    writable_methods!();
+
+    /// Builder for writability
+    pub fn with_writable(mut self, writable: bool) -> Self {
+        self.writable = writable;
+        self
+    }
+    /// Set mutability to writable
+    pub fn writable(self) -> Self {
+        self.with_writable(true)
+    }
+    /// Set mutability to read-only
+    pub fn read_only(self) -> Self {
+        self.with_writable(false)
+    }
+    /// Setter for mutability
+    pub fn set_writable(&mut self, writable: bool) {
+        self.writable = writable;
+    }
+    /// Accessor for mutability
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
 }
 
 impl Into<Decl> for DataDecl {
@@ -491,7 +486,6 @@ pub enum SectionKind {
 /// Builder for a section declaration
 pub struct SectionDecl {
     kind: SectionKind,
-    writable: bool,
     datatype: DataType,
     align: Option<usize>,
 }
@@ -499,13 +493,11 @@ pub struct SectionDecl {
 impl SectionDecl {
     datatype_methods!();
     align_methods!();
-    writable_methods!();
 
     /// Create a `SectionDecl` of the given kind
     pub fn new(kind: SectionKind) -> Self {
         SectionDecl {
             kind,
-            writable: false,
             datatype: DataType::Bytes,
             align: None,
         }
@@ -515,6 +507,14 @@ impl SectionDecl {
     /// for symmetry with other section declarations
     pub fn is_global(&self) -> bool {
         false
+    }
+
+    /// Accessor to determine whether contents are writable
+    pub fn is_writable(&self) -> bool {
+        match self.kind {
+            SectionKind::Data => true,
+            SectionKind::Debug | SectionKind::Text => false,
+        }
     }
 
     /// Get the kind for this `SectionDecl`
