@@ -1,6 +1,6 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc};
+use crate::artifact::{DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc, SectionKind};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
@@ -427,8 +427,8 @@ impl SegmentBuilder {
         let mut local_size = 0;
         let mut segment_relative_offset = 0;
         for def in definitions {
-            if let DefinedDecl::DebugSection { .. } = def.decl {
-                unimplemented!("debug sections for mach backend")
+            if let DefinedDecl::Section { .. } = def.decl {
+                unreachable!();
             }
             local_size += def.data.len() as u64;
             symtab.insert(
@@ -454,19 +454,29 @@ impl SegmentBuilder {
         *addr += local_size;
         sections.insert(sectname.to_string(), section);
     }
-    fn build_debug_section(
+    fn build_custom_section(
         sections: &mut IndexMap<String, SectionBuilder>,
         offset: &mut u64,
         addr: &mut u64,
         def: &Definition,
     ) {
+        let segment_name = match def.decl {
+            DefinedDecl::Section(s) => match s.kind() {
+                SectionKind::Data => "__DATA",
+                SectionKind::Debug => "__DWARF",
+                SectionKind::Text => "__TEXT",
+            },
+            _ => unreachable!("in build_custom_section: def.decl != Section"),
+        };
+
         let sectname = if def.name.starts_with('.') {
             format!("__{}", &def.name[1..])
         } else {
             def.name.to_string()
         };
+
         let local_size = def.data.len() as u64;
-        let section = SectionBuilder::new(sectname, "__DWARF", local_size)
+        let section = SectionBuilder::new(sectname, segment_name, local_size)
             .offset(*offset)
             .addr(*addr)
             .align(1)
@@ -482,7 +492,7 @@ impl SegmentBuilder {
         code: &[Definition],
         data: &[Definition],
         cstrings: &[Definition],
-        debug_sections: &[Definition],
+        custom_sections: &[Definition],
         symtab: &mut SymbolTable,
         ctx: &Ctx,
     ) -> Self {
@@ -529,8 +539,8 @@ impl SegmentBuilder {
             0,
             Some(S_CSTRING_LITERALS),
         );
-        for def in debug_sections {
-            Self::build_debug_section(&mut sections, &mut offset, &mut size, def);
+        for def in custom_sections {
+            Self::build_custom_section(&mut sections, &mut offset, &mut size, def);
         }
         for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
@@ -559,7 +569,7 @@ struct Mach<'a> {
     code: ArtifactCode<'a>,
     data: ArtifactData<'a>,
     cstrings: Vec<Definition<'a>>,
-    debug: Vec<Definition<'a>>,
+    sections: Vec<Definition<'a>>,
     _p: ::std::marker::PhantomData<&'a ()>,
 }
 
@@ -567,7 +577,7 @@ impl<'a> Mach<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         // FIXME: I believe we can avoid this partition by refactoring SegmentBuilder::new
-        let (mut code, mut data, mut cstrings, mut debug) =
+        let (mut code, mut data, mut cstrings, mut sections) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for def in artifact.definitions() {
             match def.decl {
@@ -581,8 +591,8 @@ impl<'a> Mach<'a> {
                         data.push(def);
                     }
                 }
-                DefinedDecl::DebugSection { .. } => {
-                    debug.push(def);
+                DefinedDecl::Section(_) => {
+                    sections.push(def);
                 }
             }
         }
@@ -593,7 +603,7 @@ impl<'a> Mach<'a> {
             &code,
             &data,
             &cstrings,
-            &debug,
+            &sections,
             &mut symtab,
             &ctx,
         );
@@ -608,7 +618,7 @@ impl<'a> Mach<'a> {
             code,
             data,
             cstrings,
-            debug,
+            sections,
         }
     }
     fn header(&self, sizeofcmds: u64) -> Header {
@@ -719,12 +729,12 @@ impl<'a> Mach<'a> {
         debug!("SEEK: after cstrings: {}", file.seek(Current(0))?);
 
         //////////////////////////////
-        // write debug sections
+        // write custom sections
         //////////////////////////////
-        for debug in self.debug {
-            file.write_all(debug.data)?;
+        for section in self.sections {
+            file.write_all(section.data)?;
         }
-        debug!("SEEK: after debug: {}", file.seek(Current(0))?);
+        debug!("SEEK: after custom sections: {}", file.seek(Current(0))?);
 
         //////////////////////////////
         // write symtable
@@ -787,12 +797,21 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                 // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
                 // e.g., global static data references, are constructed from Data -> Data links
                 match (link.from.decl, link.to.decl) {
-                    (Decl::Defined(DefinedDecl::DebugSection { .. }), _) => {
+                    (Decl::Defined(DefinedDecl::Section(s)), _)
+                        if s.kind() == SectionKind::Debug =>
+                    {
                         panic!("must use Reloc::Debug for debug section links")
                     }
                     // only debug sections should link to debug sections
-                    (_, Decl::Defined(DefinedDecl::DebugSection { .. })) => {
+                    (_, Decl::Defined(DefinedDecl::Section(s)))
+                        if s.kind() == SectionKind::Debug =>
+                    {
                         panic!("invalid DebugSection link")
+                    }
+
+                    (Decl::Defined(DefinedDecl::Section(_)), _)
+                    | (_, Decl::Defined(DefinedDecl::Section(_))) => {
+                        panic!("relocations are not yet supported for custom sections")
                     }
                     // various static function pointers in the .data section
                     (

@@ -160,7 +160,7 @@ impl<'a> SymbolBuilder<'a> {
                 st_info = STT_NOTYPE;
                 st_info |= STB_GLOBAL << 4;
             }
-            SymbolType::Decl(DefinedDecl::DebugSection(_)) | SymbolType::Section => {
+            SymbolType::Decl(DefinedDecl::Section(_)) | SymbolType::Section => {
                 st_info |= STT_SECTION;
                 st_info |= STB_LOCAL << 4;
             }
@@ -479,7 +479,7 @@ impl<'a> Elf<'a> {
                 if d.is_writable() { "data" } else { "rodata" },
                 name
             ),
-            DefinedDecl::DebugSection(_) => name.to_owned(),
+            DefinedDecl::Section(_) => name.to_owned(),
         };
 
         let section = match decl {
@@ -498,7 +498,7 @@ impl<'a> Elf<'a> {
                 .writable(d.is_writable())
                 .exec(false)
                 .align(d.get_align()),
-            DefinedDecl::DebugSection(d) => SectionBuilder::new(def_size as u64)
+            DefinedDecl::Section(d) => SectionBuilder::new(def_size as u64)
                 .section_type(
                     // TODO: this behavior should be deprecated, but we need to warn users!
                     if name == ".debug_str" || name == ".debug_line_str" {
@@ -537,8 +537,8 @@ impl<'a> Elf<'a> {
                     self.nlocals += 1;
                 }
             }
-            DefinedDecl::DebugSection(_) => {
-                // No symbols in debug sections, yet...
+            DefinedDecl::Section(_) => {
+                // No symbols in custom sections, yet...
             }
         }
     }

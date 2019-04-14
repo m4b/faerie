@@ -10,7 +10,7 @@ use failure::Error;
 use structopt::StructOpt;
 use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor};
 
-use faerie::{ArtifactBuilder, Decl, Link, Reloc};
+use faerie::{ArtifactBuilder, Decl, Link, Reloc, SectionKind};
 use std::env;
 use std::fs::File;
 use std::path::Path;
@@ -159,6 +159,10 @@ fn run (args: Args) -> Result<(), Error> {
     // .data static references need to be zero'd out explicitly for now.
     obj.define("STATIC_REF", vec![0; 8])?;
 
+    // define a custom section
+    obj.declare(".faerie", Decl::section(SectionKind::Data))?;
+    obj.define(".faerie", b"some data".to_vec())?;
+
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
     // -- main relocations --
@@ -209,9 +213,9 @@ fn deadbeef (args: Args) -> Result<(), Error> {
 
     if args.dwarf {
         // DWARF sections
-        obj.declare(".debug_abbrev", Decl::debug_section())?;
-        obj.declare(".debug_info", Decl::debug_section())?;
-        obj.declare(".debug_str", Decl::debug_section())?;
+        obj.declare(".debug_abbrev", Decl::section(SectionKind::Debug))?;
+        obj.declare(".debug_info", Decl::section(SectionKind::Debug))?;
+        obj.declare(".debug_str", Decl::section(SectionKind::Debug))?;
 
         obj.define(".debug_str",
             concat![

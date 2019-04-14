@@ -22,8 +22,8 @@ mod target;
 pub mod artifact;
 pub use crate::artifact::{
     decl::{
-        DataDecl, DataImportDecl, DataType, DebugSectionDecl, Decl, FunctionDecl,
-        FunctionImportDecl, Scope, Visibility,
+        DataDecl, DataImportDecl, DataType, Decl, FunctionDecl, FunctionImportDecl, Scope,
+        SectionDecl, SectionKind, Visibility,
     },
     Artifact, ArtifactBuilder, ArtifactError, ImportKind, Link, Reloc,
 };
