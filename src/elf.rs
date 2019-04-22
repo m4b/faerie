@@ -382,7 +382,7 @@ struct Elf<'a> {
     sizeof_strtab: Offset,
     strings: DefaultStringInterner,
     sizeof_bits: Offset,
-    nsections: u16,
+    nsections: u64,
     ctx: Ctx,
     architecture: Architecture,
     nlocals: usize,
@@ -720,6 +720,7 @@ impl<'a> Elf<'a> {
         }
     }
     pub fn write<T: Write + Seek>(mut self, file: T) -> goblin::error::Result<()> {
+        use goblin::elf::section_header::SHN_LORESERVE;
         let mut file = BufWriter::new(file);
         /////////////////////////////////////
         // Compute Offsets
@@ -750,7 +751,7 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = self.nsections;
+        header.e_shnum = if self.nsections < SHN_LORESERVE.into() { self.nsections as u16 } else { 0 };
         header.e_shstrndx = STRTAB_LINK;
 
         file.iowrite_with(header, self.ctx)?;
@@ -865,6 +866,10 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Sections
         /////////////////////////////////////
+        // if sections in file >= 0xff00, first section's sh_size contains the real number of sections
+        if self.nsections >= SHN_LORESERVE.into() {
+            section_headers[0].sh_size = self.nsections;
+        }
         let shdr_size = section_headers.len() as u64 * Section::size(&self.ctx) as u64;
         for shdr in section_headers {
             debug!("Section: {:?}", shdr);
