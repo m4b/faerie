@@ -111,8 +111,8 @@ impl<'a> SymbolBuilder<'a> {
     }
     /// Set the section index
     pub fn section_index(mut self, shndx: usize) -> Self {
-        // Underlying representation is only 16 bits. Catch this early!
-        debug_assert!(shndx < u16::max_value() as usize);
+        // Underlying representation is only 32 bits. Catch this early!
+        debug_assert!(shndx < u32::max_value() as usize);
         self.shndx = shndx;
         self
     }
@@ -190,6 +190,7 @@ enum SectionType {
     StrTab,
     SymTab,
     Relocation,
+    SymTabShndx,
     None,
 }
 
@@ -305,6 +306,11 @@ impl SectionBuilder {
                 shdr.sh_flags = 0;
                 shdr.sh_type = SHT_RELA
             }
+            SectionType::SymTabShndx => {
+                shdr.sh_entsize = 4;
+                shdr.sh_addralign = 4;
+                shdr.sh_type = SHT_SYMTAB_SHNDX;
+            }
             SectionType::None => shdr.sh_type = SHT_NULL,
         }
         shdr
@@ -382,10 +388,11 @@ struct Elf<'a> {
     sizeof_strtab: Offset,
     strings: DefaultStringInterner,
     sizeof_bits: Offset,
-    nsections: u64,
+    nsections: u32,
     ctx: Ctx,
     architecture: Architecture,
     nlocals: usize,
+    extended_symtab:Option<Vec<u8>>,
 }
 
 impl<'a> fmt::Debug for Elf<'a> {
@@ -455,6 +462,7 @@ impl<'a> Elf<'a> {
             ctx,
             architecture: artifact.target.architecture,
             nlocals: 0,
+            extended_symtab: None,
         }
     }
     fn new_string(&mut self, name: String) -> (StringIndex, usize) {
@@ -719,9 +727,73 @@ impl<'a> Elf<'a> {
             self.nsections += 1;
         }
     }
+    pub fn add_extended_symtab(&mut self) -> usize {
+        // copypasta'd from add_progbits
+        let name = ".symtab_shndxr".to_string();
+        let (idx, offset) = self.new_string(name);
+        debug!(
+            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+            idx, offset, self.sizeof_strtab
+        );
+        // the symbols section reference/index will be the current number of sections
+        let shndx = self.sections.len() + 3; // null + strtab + symtab
+        let section_symbol = SymbolBuilder::new(SymbolType::Section)
+            .section_index(shndx)
+            .create();
+
+        let section = SectionBuilder::new(((self.special_symbols.len() + self.sections.len() + self.nlocals + 1) * 4) as u64)
+            .section_type(SectionType::SymTabShndx);
+
+        let mut section = section.name_offset(offset).create(&self.ctx);
+        section.sh_link = 2;
+        // the offset is the head of how many program bits we've added
+        section.sh_offset = self.sizeof_bits as u64;
+        self.sections.insert(
+            idx,
+            SectionInfo {
+                header: section,
+                symbol: section_symbol,
+                name: idx,
+            },
+        );
+
+        // now that we inserted the final symbol, build the actual table
+        let mut data:Vec<u8> = Vec::with_capacity((self.special_symbols.len() + self.sections.len() + self.nlocals) * 4);
+        fn addpls(data:&mut Vec<u8>, mut a: u32) {
+            data.push((a & 0xff) as u8);
+            data.push(((a >> 8) & 0xff) as u8);
+            data.push(((a >> 16) & 0xff) as u8);
+            data.push(((a >> 24) & 0xff) as u8);
+        }
+
+        for symbol in &self.special_symbols {
+            addpls(&mut data, symbol.st_shndx as u32);
+        }
+        for (_id, section) in &self.sections {
+            addpls(&mut data, section.symbol.st_shndx as u32);
+        }
+        for (_id, symbol) in &self.symbols {
+            addpls(&mut data, symbol.st_shndx as u32);
+        }
+
+        // store the size of this code
+        let size = data.len();
+        self.extended_symtab = Some(data);
+
+        self.nsections += 1;
+        // increment the size
+        self.sizeof_bits += size;
+        shndx
+    }
     pub fn write<T: Write + Seek>(mut self, file: T) -> goblin::error::Result<()> {
-        use goblin::elf::section_header::SHN_LORESERVE;
+        use goblin::elf::section_header::{SHN_LORESERVE, SHN_XINDEX};
         let mut file = BufWriter::new(file);
+
+        let needs_extended_symtab = self.nsections >= SHN_LORESERVE.into();
+        if needs_extended_symtab {
+            self.add_extended_symtab();
+        }
+
         /////////////////////////////////////
         // Compute Offsets
         /////////////////////////////////////
@@ -751,7 +823,7 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = if self.nsections < SHN_LORESERVE.into() { self.nsections as u16 } else { 0 };
+        header.e_shnum = if needs_extended_symtab { 0 } else { self.nsections as u16 };
         header.e_shstrndx = STRTAB_LINK;
 
         file.iowrite_with(header, self.ctx)?;
@@ -765,6 +837,9 @@ impl<'a> Elf<'a> {
 
         for (_idx, bytes) in self.code.drain(..) {
             file.write_all(bytes)?;
+        }
+        if needs_extended_symtab {
+            file.write_all(&self.extended_symtab.unwrap());
         }
         let after_code = file.seek(Current(0))?;
         debug!("after_code {:#x}", after_code);
@@ -803,7 +878,7 @@ impl<'a> Elf<'a> {
         // Strtab
         /////////////////////////////////////
         file.seek(Start(strtab_offset))?;
-        file.iowrite(0u8)?; // for the null value in the strtab;
+        file.iowrite(0u8)?; // for the null value in the strsection_indextab;
         for (_id, string) in self.strings.iter() {
             debug!("String: {:?}", string);
             file.write_all(string.as_bytes())?;
@@ -818,16 +893,28 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         for symbol in self.special_symbols.into_iter() {
             debug!("Special Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            let mut sym = symbol.clone();
+            if sym.st_shndx >= SHN_LORESERVE as usize {
+                sym.st_shndx = SHN_XINDEX as usize;
+            }
+            file.iowrite_with(sym, self.ctx)?;
         }
         for (_id, section) in self.sections.into_iter() {
             debug!("Section Symbol: {:?}", section.symbol);
-            file.iowrite_with(section.symbol, self.ctx)?;
+            let mut sym = section.symbol.clone();
+            if sym.st_shndx >= SHN_LORESERVE as usize {
+                sym.st_shndx = SHN_XINDEX as usize;
+            }
+            file.iowrite_with(sym, self.ctx)?;
             section_headers.push(section.header);
         }
         for (_id, symbol) in self.symbols.into_iter() {
             debug!("Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            let mut sym = symbol.clone();
+            if sym.st_shndx >= SHN_LORESERVE as usize {
+                sym.st_shndx = SHN_XINDEX as usize;
+            }
+            file.iowrite_with(sym, self.ctx)?;
         }
         let after_symtab = file.seek(Current(0))?;
         debug!(
@@ -867,8 +954,8 @@ impl<'a> Elf<'a> {
         // Sections
         /////////////////////////////////////
         // if sections in file >= 0xff00, first section's sh_size contains the real number of sections
-        if self.nsections >= SHN_LORESERVE.into() {
-            section_headers[0].sh_size = self.nsections;
+        if needs_extended_symtab {
+            section_headers[0].sh_size = self.nsections as u64;
         }
         let shdr_size = section_headers.len() as u64 * Section::size(&self.ctx) as u64;
         for shdr in section_headers {
