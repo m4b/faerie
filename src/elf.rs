@@ -27,7 +27,7 @@ use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
 use goblin::elf::reloc;
-use goblin::elf::section_header::{self, SectionHeader};
+use goblin::elf::section_header::{self, SectionHeader, SHN_LORESERVE};
 
 // interned string idx
 type StringIndex = usize;
@@ -382,7 +382,7 @@ struct Elf<'a> {
     sizeof_strtab: Offset,
     strings: DefaultStringInterner,
     sizeof_bits: Offset,
-    nsections: u16,
+    nsections: u64,
     ctx: Ctx,
     architecture: Architecture,
     nlocals: usize,
@@ -750,7 +750,10 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = self.nsections;
+        // ELF spec states if number of sections >= 0xff00, then
+        // the the size equals 0xff00 and the NULL section header
+        // sh_size field contains the real value, which we do below.
+        header.e_shnum = if self.nsections >= SHN_LORESERVE as u64 { SHN_LORESERVE as u16 } else { self.nsections as u16};
         header.e_shstrndx = STRTAB_LINK;
 
         file.iowrite_with(header, self.ctx)?;
@@ -773,7 +776,11 @@ impl<'a> Elf<'a> {
         // Init sections
         /////////////////////////////////////
 
-        let mut section_headers = vec![SectionHeader::default()];
+        let mut null_section_header = SectionHeader::default();
+        if self.nsections >= SHN_LORESERVE as u64 {
+            null_section_header.sh_size = self.nsections;
+        }
+        let mut section_headers = vec![null_section_header];
         let mut strtab = {
             let offset = *(self.offsets.get(&0).unwrap());
             SectionBuilder::new(self.sizeof_strtab as u64)
