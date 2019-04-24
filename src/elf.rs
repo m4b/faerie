@@ -741,7 +741,8 @@ impl<'a> Elf<'a> {
             .section_index(shndx)
             .create();
 
-        let section = SectionBuilder::new(((self.special_symbols.len() + self.sections.len() + self.nlocals + 1) * 4) as u64)
+        let final_symbol_count = self.special_symbols.len() + self.sections.len() + self.symbols.len() + 1;
+        let section = SectionBuilder::new((final_symbol_count * 4) as u64)
             .section_type(SectionType::SymTabShndx);
 
         let mut section = section.name_offset(offset).create(&self.ctx);
@@ -758,7 +759,7 @@ impl<'a> Elf<'a> {
         );
 
         // now that we inserted the final symbol, build the actual table
-        let mut data:Vec<u8> = Vec::with_capacity((self.special_symbols.len() + self.sections.len() + self.nlocals) * 4);
+        let mut data:Vec<u8> = Vec::with_capacity((self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4);
         fn addpls(data:&mut Vec<u8>, mut a: u32) {
             data.push((a & 0xff) as u8);
             data.push(((a >> 8) & 0xff) as u8);
@@ -878,7 +879,7 @@ impl<'a> Elf<'a> {
         // Strtab
         /////////////////////////////////////
         file.seek(Start(strtab_offset))?;
-        file.iowrite(0u8)?; // for the null value in the strsection_indextab;
+        file.iowrite(0u8)?; // for the null value in the strtab;
         for (_id, string) in self.strings.iter() {
             debug!("String: {:?}", string);
             file.write_all(string.as_bytes())?;
@@ -894,10 +895,9 @@ impl<'a> Elf<'a> {
         for symbol in self.special_symbols.into_iter() {
             debug!("Special Symbol: {:?}", symbol);
             let mut sym = symbol.clone();
-            if sym.st_shndx >= SHN_LORESERVE as usize {
-                sym.st_shndx = SHN_XINDEX as usize;
-            }
-            file.iowrite_with(sym, self.ctx)?;
+            // the special symbols's section indexs have special meanings
+            // so we don't do the shn conversion here
+            file.iowrite_with(symbol, self.ctx)?;
         }
         for (_id, section) in self.sections.into_iter() {
             debug!("Section Symbol: {:?}", section.symbol);
