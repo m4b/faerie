@@ -760,7 +760,7 @@ impl<'a> Elf<'a> {
 
         // now that we inserted the final symbol, build the actual table
         let mut data:Vec<u8> = Vec::with_capacity((self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4);
-        fn addpls(data:&mut Vec<u8>, mut a: u32) {
+        fn addpls(data:&mut Vec<u8>, a: u32) {
             data.push((a & 0xff) as u8);
             data.push(((a >> 8) & 0xff) as u8);
             data.push(((a >> 16) & 0xff) as u8);
@@ -840,7 +840,7 @@ impl<'a> Elf<'a> {
             file.write_all(bytes)?;
         }
         if needs_extended_symtab {
-            file.write_all(&self.extended_symtab.unwrap());
+            file.write_all(&self.extended_symtab.unwrap())?;
         }
         let after_code = file.seek(Current(0))?;
         debug!("after_code {:#x}", after_code);
@@ -894,7 +894,6 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         for symbol in self.special_symbols.into_iter() {
             debug!("Special Symbol: {:?}", symbol);
-            let mut sym = symbol.clone();
             // the special symbols's section indexs have special meanings
             // so we don't do the shn conversion here
             file.iowrite_with(symbol, self.ctx)?;
