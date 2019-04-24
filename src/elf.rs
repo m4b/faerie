@@ -392,7 +392,7 @@ struct Elf<'a> {
     ctx: Ctx,
     architecture: Architecture,
     nlocals: usize,
-    extended_symtab:Option<Vec<u8>>,
+    extended_symtab: Option<Vec<u8>>,
 }
 
 impl<'a> fmt::Debug for Elf<'a> {
@@ -741,7 +741,8 @@ impl<'a> Elf<'a> {
             .section_index(shndx)
             .create();
 
-        let final_symbol_count = self.special_symbols.len() + self.sections.len() + self.symbols.len() + 1;
+        let final_symbol_count =
+            self.special_symbols.len() + self.sections.len() + self.symbols.len() + 1;
         let section = SectionBuilder::new((final_symbol_count * 4) as u64)
             .section_type(SectionType::SymTabShndx);
 
@@ -759,8 +760,10 @@ impl<'a> Elf<'a> {
         );
 
         // now that we inserted the final symbol, build the actual table
-        let mut data:Vec<u8> = Vec::with_capacity((self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4);
-        fn addpls(data:&mut Vec<u8>, a: u32) {
+        let mut data: Vec<u8> = Vec::with_capacity(
+            (self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4,
+        );
+        fn addpls(data: &mut Vec<u8>, a: u32) {
             data.push((a & 0xff) as u8);
             data.push(((a >> 8) & 0xff) as u8);
             data.push(((a >> 16) & 0xff) as u8);
@@ -824,7 +827,11 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = if needs_extended_symtab { 0 } else { self.nsections as u16 };
+        header.e_shnum = if needs_extended_symtab {
+            0
+        } else {
+            self.nsections as u16
+        };
         header.e_shstrndx = STRTAB_LINK;
 
         file.iowrite_with(header, self.ctx)?;
