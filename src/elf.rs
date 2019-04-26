@@ -17,7 +17,7 @@ use failure::Error;
 use goblin;
 
 use indexmap::IndexMap;
-use scroll::IOwrite;
+use scroll::{IOwrite, Pwrite};
 use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::io::SeekFrom::*;
@@ -729,7 +729,7 @@ impl<'a> Elf<'a> {
     }
     pub fn add_extended_symtab(&mut self) -> usize {
         // copypasta'd from add_progbits
-        let name = ".symtab_shndxr".to_string();
+        let name = ".symtab_shndx".to_string();
         let (idx, offset) = self.new_string(name);
         debug!(
             "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
@@ -760,24 +760,21 @@ impl<'a> Elf<'a> {
         );
 
         // now that we inserted the final symbol, build the actual table
-        let mut data: Vec<u8> = Vec::with_capacity(
-            (self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4,
-        );
-        fn addpls(data: &mut Vec<u8>, a: u32) {
-            data.push((a & 0xff) as u8);
-            data.push(((a >> 8) & 0xff) as u8);
-            data.push(((a >> 16) & 0xff) as u8);
-            data.push(((a >> 24) & 0xff) as u8);
-        }
+        let mut data =
+            vec![0u8; (self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4];
+        let mut offset = 0;
 
         for symbol in &self.special_symbols {
-            addpls(&mut data, symbol.st_shndx as u32);
+            data.gwrite_with(symbol.st_shndx as u32, &mut offset, self.ctx.le)
+                .expect("preallocated shndx vector has enough space for special symbols");
         }
         for (_id, section) in &self.sections {
-            addpls(&mut data, section.symbol.st_shndx as u32);
+            data.gwrite_with(section.symbol.st_shndx as u32, &mut offset, self.ctx.le)
+                .expect("preallocated shndx vector has enough space for sections");
         }
         for (_id, symbol) in &self.symbols {
-            addpls(&mut data, symbol.st_shndx as u32);
+            data.gwrite_with(symbol.st_shndx as u32, &mut offset, self.ctx.le)
+                .expect("preallocated shndx vector has enough space for symbols");
         }
 
         // store the size of this code
