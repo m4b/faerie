@@ -392,7 +392,6 @@ struct Elf<'a> {
     ctx: Ctx,
     architecture: Architecture,
     nlocals: usize,
-    extended_symtab: Option<Vec<u8>>,
 }
 
 impl<'a> fmt::Debug for Elf<'a> {
@@ -462,7 +461,6 @@ impl<'a> Elf<'a> {
             ctx,
             architecture: artifact.target.architecture,
             nlocals: 0,
-            extended_symtab: None,
         }
     }
     fn new_string(&mut self, name: String) -> (StringIndex, usize) {
@@ -727,83 +725,33 @@ impl<'a> Elf<'a> {
             self.nsections += 1;
         }
     }
-    pub fn add_extended_symtab(&mut self) -> usize {
-        // copypasta'd from add_progbits
-        let name = ".symtab_shndx".to_string();
-        let (idx, offset) = self.new_string(name);
-        debug!(
-            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
-            idx, offset, self.sizeof_strtab
-        );
-        // the symbols section reference/index will be the current number of sections
-        let shndx = self.sections.len() + 3; // null + strtab + symtab
-        let section_symbol = SymbolBuilder::new(SymbolType::Section)
-            .section_index(shndx)
-            .create();
-
-        let final_symbol_count =
-            self.special_symbols.len() + self.sections.len() + self.symbols.len() + 1;
-        let section = SectionBuilder::new((final_symbol_count * 4) as u64)
-            .section_type(SectionType::SymTabShndx);
-
-        let mut section = section.name_offset(offset).create(&self.ctx);
-        section.sh_link = 2;
-        // the offset is the head of how many program bits we've added
-        section.sh_offset = self.sizeof_bits as u64;
-        self.sections.insert(
-            idx,
-            SectionInfo {
-                header: section,
-                symbol: section_symbol,
-                name: idx,
-            },
-        );
-
-        // now that we inserted the final symbol, build the actual table
-        let mut data =
-            vec![0u8; (self.special_symbols.len() + self.sections.len() + self.symbols.len()) * 4];
-        let mut offset = 0;
-
-        for symbol in &self.special_symbols {
-            data.gwrite_with(symbol.st_shndx as u32, &mut offset, self.ctx.le)
-                .expect("preallocated shndx vector has enough space for special symbols");
-        }
-        for (_id, section) in &self.sections {
-            data.gwrite_with(section.symbol.st_shndx as u32, &mut offset, self.ctx.le)
-                .expect("preallocated shndx vector has enough space for sections");
-        }
-        for (_id, symbol) in &self.symbols {
-            data.gwrite_with(symbol.st_shndx as u32, &mut offset, self.ctx.le)
-                .expect("preallocated shndx vector has enough space for symbols");
-        }
-
-        // store the size of this code
-        let size = data.len();
-        self.extended_symtab = Some(data);
-
-        self.nsections += 1;
-        // increment the size
-        self.sizeof_bits += size;
-        shndx
-    }
     fn align(offset: &mut u64, sizeof_t: u64) {
         let alignment = *offset % sizeof_t;
-        *offset += sizeof_t - alignment;
+        if alignment != 0 {
+            *offset += sizeof_t - alignment;
+        }
     }
     pub fn write<T: Write + Seek>(mut self, file: T) -> goblin::error::Result<()> {
         use goblin::elf::section_header::{SHN_LORESERVE, SHN_XINDEX};
         let mut file = BufWriter::new(file);
 
-        let needs_extended_symtab = self.nsections >= SHN_LORESERVE.into();
-        if needs_extended_symtab {
-            self.add_extended_symtab();
-        }
-
         /////////////////////////////////////
         // Compute Offsets
         /////////////////////////////////////
-        let sizeof_symtab = (self.symbols.len() + self.special_symbols.len() + self.sections.len())
-            * Symbol::size(self.ctx.container);
+        let symbol_count = self.symbols.len() + self.special_symbols.len() + self.sections.len();
+        let sizeof_symtab = symbol_count * Symbol::size(self.ctx.container);
+        // This check is a bit lax, we really only need .symtab_shndx if there is a symbol
+        // that has a large section index, but we currently add symbols for most sections
+        // so it's ok.
+        let mut sizeof_symtab_shndx = 0;
+        let mut symtab_shndx_name_offset = 0;
+        let mut need_symtab_shndx = false;
+        if self.nsections >= SHN_LORESERVE.into() {
+            self.nsections += 1;
+            sizeof_symtab_shndx = symbol_count as u64 * 4;
+            symtab_shndx_name_offset = self.new_string(".symtab_shndx".into()).1;
+            need_symtab_shndx = true;
+        };
         let sizeof_relocs = self
             .relocations
             .iter()
@@ -814,14 +762,19 @@ impl<'a> Elf<'a> {
 
         // alignment required for below
         let mut symtab_offset = strtab_offset + self.sizeof_strtab as u64;
-        let sizeof_symbol = Symbol::size(self.ctx.container) as u64;
-        Self::align(&mut symtab_offset, sizeof_symbol);
-        let mut reloc_offset = symtab_offset + sizeof_symtab as u64;
-        let sizeof_relocation = Relocation::size(true, self.ctx) as u64;
-        Self::align(&mut reloc_offset, sizeof_relocation);
+        let symtab_align = self.ctx.size() as u64;
+        Self::align(&mut symtab_offset, symtab_align);
+        let mut symtab_shndx_offset = symtab_offset + sizeof_symtab as u64;
+        let symtab_shndx_align = 4;
+        if need_symtab_shndx {
+            Self::align(&mut symtab_shndx_offset, symtab_shndx_align);
+        }
+        let mut reloc_offset = symtab_shndx_offset + sizeof_symtab_shndx;
+        let reloc_align = self.ctx.size() as u64;
+        Self::align(&mut reloc_offset, reloc_align);
         let mut sh_offset = reloc_offset + sizeof_relocs as u64;
-        let sizeof_shdr = Section::size(&self.ctx) as u64;
-        Self::align(&mut sh_offset, sizeof_shdr);
+        let shdr_align = self.ctx.size() as u64;
+        Self::align(&mut sh_offset, shdr_align);
 
         info!(
             "strtab: {:#x} symtab {:#x} relocs {:#x} sh_offset {:#x}",
@@ -836,7 +789,7 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = if needs_extended_symtab {
+        header.e_shnum = if self.nsections >= SHN_LORESERVE.into() {
             0
         } else {
             self.nsections as u16
@@ -855,9 +808,6 @@ impl<'a> Elf<'a> {
         for (_idx, bytes) in self.code.drain(..) {
             file.write_all(bytes)?;
         }
-        if needs_extended_symtab {
-            file.write_all(&self.extended_symtab.unwrap())?;
-        }
         let after_code = file.seek(Current(0))?;
         debug!("after_code {:#x}", after_code);
         assert_eq!(after_code, strtab_offset);
@@ -867,6 +817,9 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
 
         let mut section_headers = vec![SectionHeader::default()];
+        if self.nsections >= SHN_LORESERVE.into() {
+            section_headers[0].sh_size = self.nsections as u64;
+        }
         let mut strtab = {
             let offset = *(self.offsets.get(&0).unwrap());
             SectionBuilder::new(self.sizeof_strtab as u64)
@@ -903,7 +856,7 @@ impl<'a> Elf<'a> {
         }
         {
             let mut after_strtab = file.seek(Current(0))?;
-            Self::align(&mut after_strtab, sizeof_symbol);
+            Self::align(&mut after_strtab, symtab_align);
             debug!("after_strtab {:#x}", after_strtab);
             assert_eq!(after_strtab, symtab_offset);
         }
@@ -911,16 +864,32 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Symtab
         /////////////////////////////////////
+        let mut symtab_shndx_data: Vec<u8> = if need_symtab_shndx {
+            vec![0; symbol_count * 4]
+        } else {
+            Vec::new()
+        };
+        let mut offset = 0;
         file.seek(Start(symtab_offset))?;
         for symbol in self.special_symbols.into_iter() {
             debug!("Special Symbol: {:?}", symbol);
             // the special symbols's section indexs have special meanings
             // so we don't do the shn conversion here
+            if need_symtab_shndx {
+                symtab_shndx_data
+                    .gwrite_with(symbol.st_shndx as u32, &mut offset, self.ctx.le)
+                    .expect("preallocated shndx vector has enough space for special symbols");
+            }
             file.iowrite_with(symbol, self.ctx)?;
         }
         for (_id, section) in self.sections.into_iter() {
             debug!("Section Symbol: {:?}", section.symbol);
             let mut sym = section.symbol.clone();
+            if need_symtab_shndx {
+                symtab_shndx_data
+                    .gwrite_with(sym.st_shndx as u32, &mut offset, self.ctx.le)
+                    .expect("preallocated shndx vector has enough space for sections");
+            }
             if sym.st_shndx >= SHN_LORESERVE as usize {
                 sym.st_shndx = SHN_XINDEX as usize;
             }
@@ -930,20 +899,42 @@ impl<'a> Elf<'a> {
         for (_id, symbol) in self.symbols.into_iter() {
             debug!("Symbol: {:?}", symbol);
             let mut sym = symbol.clone();
+            if need_symtab_shndx {
+                symtab_shndx_data
+                    .gwrite_with(sym.st_shndx as u32, &mut offset, self.ctx.le)
+                    .expect("preallocated shndx vector has enough space for symbols");
+            }
             if sym.st_shndx >= SHN_LORESERVE as usize {
                 sym.st_shndx = SHN_XINDEX as usize;
             }
             file.iowrite_with(sym, self.ctx)?;
         }
+        if need_symtab_shndx {
+            {
+                let mut after_symtab = file.seek(Current(0))?;
+                Self::align(&mut after_symtab, symtab_shndx_align);
+                debug!("after_symtab {:#x}", after_symtab);
+                assert_eq!(after_symtab, symtab_shndx_offset);
+            }
+            file.seek(Start(symtab_shndx_offset))?;
+            file.write_all(&symtab_shndx_data)?;
+            let mut section = SectionBuilder::new(sizeof_symtab_shndx)
+                .name_offset(symtab_shndx_name_offset)
+                .section_type(SectionType::SymTabShndx)
+                .create(&self.ctx);
+            section.sh_link = 2;
+            section.sh_offset = symtab_shndx_offset;
+            section_headers.push(section);
+        }
         {
-            let mut after_symtab = file.seek(Current(0))?;
-            Self::align(&mut after_symtab, sizeof_symbol);
+            let mut after_symtab_shndx = file.seek(Current(0))?;
+            Self::align(&mut after_symtab_shndx, reloc_align);
             debug!(
-                "after_symtab {:#x} - shdr_size {}",
-                after_symtab,
+                "after_symtab_shndx {:#x} - shdr_size {}",
+                after_symtab_shndx,
                 Section::size(&self.ctx)
             );
-            assert_eq!(after_symtab, reloc_offset);
+            assert_eq!(after_symtab_shndx, reloc_offset);
         }
 
         /////////////////////////////////////
@@ -962,7 +953,7 @@ impl<'a> Elf<'a> {
         }
         {
             let mut after_relocs = file.seek(Current(0))?;
-            Self::align(&mut after_relocs, sizeof_shdr);
+            Self::align(&mut after_relocs, shdr_align);
             debug!("after_relocs {:#x}", after_relocs);
             assert_eq!(after_relocs, sh_offset);
         }
@@ -979,10 +970,6 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Sections
         /////////////////////////////////////
-        // if sections in file >= 0xff00, first section's sh_size contains the real number of sections
-        if needs_extended_symtab {
-            section_headers[0].sh_size = self.nsections as u64;
-        }
         let sizeof_shdr = Section::size(&self.ctx) as u64;
         let shdr_size = section_headers.len() as u64 * sizeof_shdr;
 
