@@ -17,7 +17,7 @@ use failure::Error;
 use goblin;
 
 use indexmap::IndexMap;
-use scroll::IOwrite;
+use scroll::{IOwrite, Pwrite};
 use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::io::SeekFrom::*;
@@ -111,8 +111,8 @@ impl<'a> SymbolBuilder<'a> {
     }
     /// Set the section index
     pub fn section_index(mut self, shndx: usize) -> Self {
-        // Underlying representation is only 16 bits. Catch this early!
-        debug_assert!(shndx < u16::max_value() as usize);
+        // Underlying representation is only 32 bits. Catch this early!
+        debug_assert!(shndx < u32::max_value() as usize);
         self.shndx = shndx;
         self
     }
@@ -190,6 +190,7 @@ enum SectionType {
     StrTab,
     SymTab,
     Relocation,
+    SymTabShndx,
     None,
 }
 
@@ -305,6 +306,11 @@ impl SectionBuilder {
                 shdr.sh_flags = 0;
                 shdr.sh_type = SHT_RELA
             }
+            SectionType::SymTabShndx => {
+                shdr.sh_entsize = 4;
+                shdr.sh_addralign = 4;
+                shdr.sh_type = SHT_SYMTAB_SHNDX;
+            }
             SectionType::None => shdr.sh_type = SHT_NULL,
         }
         shdr
@@ -382,7 +388,7 @@ struct Elf<'a> {
     sizeof_strtab: Offset,
     strings: DefaultStringInterner,
     sizeof_bits: Offset,
-    nsections: u16,
+    nsections: u32,
     ctx: Ctx,
     architecture: Architecture,
     nlocals: usize,
@@ -719,13 +725,33 @@ impl<'a> Elf<'a> {
             self.nsections += 1;
         }
     }
+    fn align(offset: &mut u64, sizeof_t: u64) {
+        let alignment = *offset % sizeof_t;
+        if alignment != 0 {
+            *offset += sizeof_t - alignment;
+        }
+    }
     pub fn write<T: Write + Seek>(mut self, file: T) -> goblin::error::Result<()> {
+        use goblin::elf::section_header::{SHN_LORESERVE, SHN_XINDEX};
         let mut file = BufWriter::new(file);
+
         /////////////////////////////////////
         // Compute Offsets
         /////////////////////////////////////
-        let sizeof_symtab = (self.symbols.len() + self.special_symbols.len() + self.sections.len())
-            * Symbol::size(self.ctx.container);
+        let symbol_count = self.symbols.len() + self.special_symbols.len() + self.sections.len();
+        let sizeof_symtab = symbol_count * Symbol::size(self.ctx.container);
+        // This check is a bit lax, we really only need .symtab_shndx if there is a symbol
+        // that has a large section index, but we currently add symbols for most sections
+        // so it's ok.
+        let mut sizeof_symtab_shndx = 0;
+        let mut symtab_shndx_name_offset = 0;
+        let mut need_symtab_shndx = false;
+        if self.nsections >= SHN_LORESERVE.into() {
+            self.nsections += 1;
+            sizeof_symtab_shndx = symbol_count as u64 * 4;
+            symtab_shndx_name_offset = self.new_string(".symtab_shndx".into()).1;
+            need_symtab_shndx = true;
+        };
         let sizeof_relocs = self
             .relocations
             .iter()
@@ -733,11 +759,24 @@ impl<'a> Elf<'a> {
             * Relocation::size(true, self.ctx);
         let nonexec_stack_note_name_offset = self.new_string(".note.GNU-stack".into()).1;
         let strtab_offset = self.sizeof_bits as u64;
-        let symtab_offset = strtab_offset + self.sizeof_strtab as u64;
-        let reloc_offset = symtab_offset + sizeof_symtab as u64;
-        let sh_offset = reloc_offset + sizeof_relocs as u64;
 
-        debug!(
+        // alignment required for below
+        let mut symtab_offset = strtab_offset + self.sizeof_strtab as u64;
+        let symtab_align = self.ctx.size() as u64;
+        Self::align(&mut symtab_offset, symtab_align);
+        let mut symtab_shndx_offset = symtab_offset + sizeof_symtab as u64;
+        let symtab_shndx_align = 4;
+        if need_symtab_shndx {
+            Self::align(&mut symtab_shndx_offset, symtab_shndx_align);
+        }
+        let mut reloc_offset = symtab_shndx_offset + sizeof_symtab_shndx;
+        let reloc_align = self.ctx.size() as u64;
+        Self::align(&mut reloc_offset, reloc_align);
+        let mut sh_offset = reloc_offset + sizeof_relocs as u64;
+        let shdr_align = self.ctx.size() as u64;
+        Self::align(&mut sh_offset, shdr_align);
+
+        info!(
             "strtab: {:#x} symtab {:#x} relocs {:#x} sh_offset {:#x}",
             strtab_offset, symtab_offset, reloc_offset, sh_offset
         );
@@ -750,7 +789,11 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = self.nsections;
+        header.e_shnum = if self.nsections >= SHN_LORESERVE.into() {
+            0
+        } else {
+            self.nsections as u16
+        };
         header.e_shstrndx = STRTAB_LINK;
 
         file.iowrite_with(header, self.ctx)?;
@@ -774,6 +817,9 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
 
         let mut section_headers = vec![SectionHeader::default()];
+        if self.nsections >= SHN_LORESERVE.into() {
+            section_headers[0].sh_size = self.nsections as u64;
+        }
         let mut strtab = {
             let offset = *(self.offsets.get(&0).unwrap());
             SectionBuilder::new(self.sizeof_strtab as u64)
@@ -808,37 +854,93 @@ impl<'a> Elf<'a> {
             file.write_all(string.as_bytes())?;
             file.iowrite(0u8)?;
         }
-        let after_strtab = file.seek(Current(0))?;
-        debug!("after_strtab {:#x}", after_strtab);
-        assert_eq!(after_strtab, symtab_offset);
+        {
+            let mut after_strtab = file.seek(Current(0))?;
+            Self::align(&mut after_strtab, symtab_align);
+            debug!("after_strtab {:#x}", after_strtab);
+            assert_eq!(after_strtab, symtab_offset);
+        }
 
         /////////////////////////////////////
         // Symtab
         /////////////////////////////////////
+        let mut symtab_shndx_data: Vec<u8> = if need_symtab_shndx {
+            vec![0; symbol_count * 4]
+        } else {
+            Vec::new()
+        };
+        let mut offset = 0;
+        file.seek(Start(symtab_offset))?;
         for symbol in self.special_symbols.into_iter() {
             debug!("Special Symbol: {:?}", symbol);
+            // the special symbols's section indexs have special meanings
+            // so we don't do the shn conversion here
+            if need_symtab_shndx {
+                symtab_shndx_data
+                    .gwrite_with(symbol.st_shndx as u32, &mut offset, self.ctx.le)
+                    .expect("preallocated shndx vector has enough space for special symbols");
+            }
             file.iowrite_with(symbol, self.ctx)?;
         }
         for (_id, section) in self.sections.into_iter() {
             debug!("Section Symbol: {:?}", section.symbol);
-            file.iowrite_with(section.symbol, self.ctx)?;
+            let mut sym = section.symbol.clone();
+            if need_symtab_shndx {
+                symtab_shndx_data
+                    .gwrite_with(sym.st_shndx as u32, &mut offset, self.ctx.le)
+                    .expect("preallocated shndx vector has enough space for sections");
+            }
+            if sym.st_shndx >= SHN_LORESERVE as usize {
+                sym.st_shndx = SHN_XINDEX as usize;
+            }
+            file.iowrite_with(sym, self.ctx)?;
             section_headers.push(section.header);
         }
         for (_id, symbol) in self.symbols.into_iter() {
             debug!("Symbol: {:?}", symbol);
-            file.iowrite_with(symbol, self.ctx)?;
+            let mut sym = symbol.clone();
+            if need_symtab_shndx {
+                symtab_shndx_data
+                    .gwrite_with(sym.st_shndx as u32, &mut offset, self.ctx.le)
+                    .expect("preallocated shndx vector has enough space for symbols");
+            }
+            if sym.st_shndx >= SHN_LORESERVE as usize {
+                sym.st_shndx = SHN_XINDEX as usize;
+            }
+            file.iowrite_with(sym, self.ctx)?;
         }
-        let after_symtab = file.seek(Current(0))?;
-        debug!(
-            "after_symtab {:#x} - shdr_size {}",
-            after_symtab,
-            Section::size(&self.ctx)
-        );
-        assert_eq!(after_symtab, reloc_offset);
+        if need_symtab_shndx {
+            {
+                let mut after_symtab = file.seek(Current(0))?;
+                Self::align(&mut after_symtab, symtab_shndx_align);
+                debug!("after_symtab {:#x}", after_symtab);
+                assert_eq!(after_symtab, symtab_shndx_offset);
+            }
+            file.seek(Start(symtab_shndx_offset))?;
+            file.write_all(&symtab_shndx_data)?;
+            let mut section = SectionBuilder::new(sizeof_symtab_shndx)
+                .name_offset(symtab_shndx_name_offset)
+                .section_type(SectionType::SymTabShndx)
+                .create(&self.ctx);
+            section.sh_link = 2;
+            section.sh_offset = symtab_shndx_offset;
+            section_headers.push(section);
+        }
+        {
+            let mut after_symtab_shndx = file.seek(Current(0))?;
+            Self::align(&mut after_symtab_shndx, reloc_align);
+            debug!(
+                "after_symtab_shndx {:#x} - shdr_size {}",
+                after_symtab_shndx,
+                Section::size(&self.ctx)
+            );
+            assert_eq!(after_symtab_shndx, reloc_offset);
+        }
 
         /////////////////////////////////////
         // Relocations
         /////////////////////////////////////
+        file.seek(Start(reloc_offset))?;
         let mut roffset = reloc_offset;
         for (_, (mut section, mut relocations)) in self.relocations.into_iter() {
             section.sh_offset = roffset;
@@ -849,9 +951,12 @@ impl<'a> Elf<'a> {
                 file.iowrite_with(relocation, (relocation.r_addend.is_some(), self.ctx))?;
             }
         }
-        let after_relocs = file.seek(Current(0))?;
-        debug!("after_relocs {:#x}", after_relocs);
-        assert_eq!(after_relocs, sh_offset);
+        {
+            let mut after_relocs = file.seek(Current(0))?;
+            Self::align(&mut after_relocs, shdr_align);
+            debug!("after_relocs {:#x}", after_relocs);
+            assert_eq!(after_relocs, sh_offset);
+        }
 
         /////////////////////////////////////
         // Non-executable stack note.
@@ -865,16 +970,22 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Sections
         /////////////////////////////////////
-        let shdr_size = section_headers.len() as u64 * Section::size(&self.ctx) as u64;
+        let sizeof_shdr = Section::size(&self.ctx) as u64;
+        let shdr_size = section_headers.len() as u64 * sizeof_shdr;
+
+        file.seek(Start(sh_offset))?;
         for shdr in section_headers {
             debug!("Section: {:?}", shdr);
             file.iowrite_with(shdr, self.ctx)?;
         }
 
-        let after_shdrs = file.seek(Current(0))?;
-        let expected = sh_offset + shdr_size;
-        debug!("after_shdrs {:#x}", after_shdrs);
-        assert_eq!(after_shdrs, expected);
+        {
+            let after_shdrs = file.seek(Current(0))?;
+            let expected = sh_offset + shdr_size;
+            debug!("after_shdrs {:#x}", after_shdrs);
+            assert_eq!(after_shdrs, expected);
+        }
+
         debug!("done");
         Ok(())
     }
