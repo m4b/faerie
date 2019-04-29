@@ -6,7 +6,7 @@ extern crate target_lexicon;
 #[macro_use]
 extern crate failure;
 
-use faerie::{Artifact, Decl, Link};
+use faerie::{Artifact, ArtifactBuilder, Decl, Link};
 use failure::Error;
 use goblin::elf::*;
 use std::str::FromStr;
@@ -291,5 +291,35 @@ impl DeclTestCase {
             .get(sym.st_shndx)
             .expect("section header should exist");
         (self.pred)(&sym, sectheader).expect(&format!("check {}", self.name))
+    }
+}
+
+#[test]
+fn extended_symtab_issue_76() {
+    let name = "extended_symtab.o";
+    let mut obj = ArtifactBuilder::new(triple!("x86_64-unknown-unknown-unknown-elf"))
+        .name(name.to_string())
+        .finish();
+    for i in 0..0x10000 {
+        let n = format!("func{}", i);
+        let decl: Decl = Decl::function().global().into();
+        obj.declare_with(n, decl, vec![0xcc])
+            .expect("can declare a function");
+    }
+    let bytes = obj
+        .emit()
+        .expect("can emit elf object file with 0x10000 functions");
+    let elf = goblin::Object::parse(&bytes).expect("can parse elf file");
+    match elf {
+        goblin::Object::Elf(elf) => {
+            assert_eq!(elf.header.e_shnum, 0);
+            // FIXME: once goblin is patched this will fail, and we replace with approximately 0x1000
+            assert_eq!(elf.section_headers.len(), 0);
+            assert_eq!(elf.shdr_relocs.len(), 0);
+            assert_eq!(elf.syms.len(), 0);
+        }
+        _ => {
+            panic!("Elf file not parsed as elf file");
+        }
     }
 }
