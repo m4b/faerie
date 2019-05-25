@@ -460,27 +460,35 @@ impl SegmentBuilder {
         addr: &mut u64,
         def: &Definition,
     ) {
-        let segment_name = match def.decl {
-            DefinedDecl::Section(s) => match s.kind() {
-                SectionKind::Data => "__DATA",
-                SectionKind::Debug => "__DWARF",
-                SectionKind::Text => "__TEXT",
-            },
+        let s = match def.decl {
+            DefinedDecl::Section(s) => s,
             _ => unreachable!("in build_custom_section: def.decl != Section"),
         };
 
-        let sectname = if def.name.starts_with('.') {
-            format!("__{}", &def.name[1..])
+        let segment_name = match s.kind() {
+            SectionKind::Data => "__DATA",
+            SectionKind::Debug => "__DWARF",
+            SectionKind::Text => "__TEXT",
+        };
+
+        let sectname = if def.name.starts_with(".debug") {
+            format!("__debug{}", &def.name["debug".len()..])
         } else {
             def.name.to_string()
         };
+
+        let mut flags = 0;
+
+        if s.kind() == SectionKind::Debug {
+            flags |= S_ATTR_DEBUG;
+        }
 
         let local_size = def.data.len() as u64;
         let section = SectionBuilder::new(sectname, segment_name, local_size)
             .offset(*offset)
             .addr(*addr)
             .align(1)
-            .flags(S_ATTR_DEBUG);
+            .flags(flags);
         *offset += local_size;
         *addr += local_size;
         sections.insert(def.name.to_string(), section);
