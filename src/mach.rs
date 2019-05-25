@@ -472,7 +472,7 @@ impl SegmentBuilder {
         };
 
         let sectname = if def.name.starts_with(".debug") {
-            format!("__debug{}", &def.name["debug".len()..])
+            format!("__debug{}", &def.name[".debug".len()..])
         } else {
             def.name.to_string()
         };
