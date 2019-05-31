@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use string_interner::DefaultStringInterner;
 use target_lexicon::{BinaryFormat, Triple};
 
-use std::collections::{BTreeSet, BTreeMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Write;
 
@@ -73,8 +73,11 @@ pub enum ArtifactError {
     DuplicateDefinition(String),
 
     /// A non section declaration got custom symbols during definition.
-    #[fail(display = "Attempt to add custom symbols {:?} to non section declaration {:?}", _1, _0)]
-    NonSectionCustomSymbols(DefinedDecl, BTreeMap<String, u64>)
+    #[fail(
+        display = "Attempt to add custom symbols {:?} to non section declaration {:?}",
+        _1, _0
+    )]
+    NonSectionCustomSymbols(DefinedDecl, BTreeMap<String, u64>),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -361,7 +364,12 @@ impl Artifact {
     }
 
     /// Same as `define` but also allows to add custom symbols referencing a section decl.
-    pub fn define_with_symbols<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>, symbols: BTreeMap<String, u64>) -> Result<(), ArtifactError> {
+    pub fn define_with_symbols<T: AsRef<str>>(
+        &mut self,
+        name: T,
+        data: Vec<u8>,
+        symbols: BTreeMap<String, u64>,
+    ) -> Result<(), ArtifactError> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
@@ -379,8 +387,10 @@ impl Artifact {
 
                 match decl {
                     DefinedDecl::Section(_) => {}
-                    _ => if !symbols.is_empty() {
-                        return Err(ArtifactError::NonSectionCustomSymbols(decl, symbols));
+                    _ => {
+                        if !symbols.is_empty() {
+                            return Err(ArtifactError::NonSectionCustomSymbols(decl, symbols));
+                        }
                     }
                 }
 
