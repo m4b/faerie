@@ -475,8 +475,10 @@ impl<'a> Elf<'a> {
             }
         }
     }
-    pub fn add_definition(&mut self, name: &str, data: &'a [u8], decl: &artifact::DefinedDecl) {
-        let def_size = data.len();
+    pub fn add_definition(&mut self, def: artifact::Definition<'a>) {
+        let name = def.name;
+        let decl = def.decl;
+        let def_size = def.data.len();
 
         let section_name = match decl {
             DefinedDecl::Function(_) => format!(".text.{}", name),
@@ -519,7 +521,7 @@ impl<'a> Elf<'a> {
                 .align(d.get_align()),
         };
 
-        let shndx = self.add_progbits(section_name, section, data);
+        let shndx = self.add_progbits(section_name, section, def.data);
 
         match decl {
             DefinedDecl::Function(_) | DefinedDecl::Data(_) => {
@@ -544,7 +546,10 @@ impl<'a> Elf<'a> {
                 }
             }
             DefinedDecl::Section(_) => {
-                // No symbols in custom sections, yet...
+                for (_symbol, _symbol_dst_offset) in def.symbols {
+                    // FIXME: implement it
+                    unimplemented!("elf: custom symbols referencing sections");
+                }
             }
         }
     }
@@ -997,7 +1002,7 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
     let mut elf = Elf::new(&artifact);
     for def in artifact.definitions() {
         debug!("Def: {:?}", def);
-        elf.add_definition(def.name, def.data, def.decl);
+        elf.add_definition(def);
     }
     for (ref import, ref kind) in artifact.imports() {
         debug!("Import: {:?} -> {:?}", import, kind);

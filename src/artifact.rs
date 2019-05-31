@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use string_interner::DefaultStringInterner;
 use target_lexicon::{BinaryFormat, Triple};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, BTreeMap};
 use std::fs::File;
 use std::io::Write;
 
@@ -68,15 +68,20 @@ pub enum ArtifactError {
         /// Declaration that caused this error
         new: Decl,
     },
-    #[fail(display = "duplicate definition of symbol: {}", _0)]
+    #[fail(display = "Duplicate definition of symbol: {}", _0)]
     /// A duplicate definition
     DuplicateDefinition(String),
+
+    /// A non section declaration got custom symbols during definition.
+    #[fail(display = "Attempt to add custom symbols {:?} to non section declaration {:?}", _1, _0)]
+    NonSectionCustomSymbols(DefinedDecl, BTreeMap<String, u64>)
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct InternalDefinition {
     decl: DefinedDecl,
     name: StringID,
+    symbols: BTreeMap<String, u64>,
     data: Data,
 }
 
@@ -130,6 +135,8 @@ pub(crate) struct Definition<'a> {
     pub name: &'a str,
     /// Contents of definition
     pub data: &'a [u8],
+    /// Custom symbols referencing this section, or none for other definition types.
+    pub symbols: &'a BTreeMap<String, u64>,
     /// Declaration of symbol
     pub decl: &'a DefinedDecl,
 }
@@ -141,6 +148,7 @@ impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definitio
                 .resolve(def.name)
                 .expect("internal definition to have name"),
             data: &def.data,
+            symbols: &def.symbols,
             decl: &def.decl,
         }
     }
@@ -349,6 +357,11 @@ impl Artifact {
     /// **NB**: If you attempt to define an import, this will return an error.
     /// If you attempt to define something which has not been declared, this will return an error.
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
+        self.define_with_symbols(name, data, BTreeMap::new())
+    }
+
+    /// Same as `define` but also allows to add custom symbols referencing a section decl.
+    pub fn define_with_symbols<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>, symbols: BTreeMap<String, u64>) -> Result<(), ArtifactError> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
@@ -363,16 +376,26 @@ impl Artifact {
                         Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
                     }
                 };
+
+                match decl {
+                    DefinedDecl::Section(_) => {}
+                    _ => if !symbols.is_empty() {
+                        return Err(ArtifactError::NonSectionCustomSymbols(decl, symbols));
+                    }
+                }
+
                 if decl.is_global() {
                     self.nonlocal_definitions.insert(InternalDefinition {
                         name: decl_name,
                         data,
+                        symbols,
                         decl,
                     });
                 } else {
                     self.local_definitions.insert(InternalDefinition {
                         name: decl_name,
                         data,
+                        symbols,
                         decl,
                     });
                 }
