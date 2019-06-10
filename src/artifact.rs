@@ -364,6 +364,30 @@ impl Artifact {
     }
 
     /// Same as `define` but also allows to add custom symbols referencing a section decl.
+    ///
+    /// # Examples
+    ///
+    /// Create a MachO file with a section called `.my_section`. This section has the content
+    /// `de ad be ef`, with the symbol `a_symbol` referencing to `be`.
+    ///
+    /// ```rust
+    /// # extern crate target_lexicon;
+    /// #
+    /// # use std::collections::BTreeMap;
+    /// # use std::str::FromStr;
+    /// #
+    /// # use faerie::{Artifact, ArtifactBuilder, Decl, Link, SectionKind};
+    /// #
+    /// let mut artifact = Artifact::new(target_lexicon::triple!("x86_64-apple-darwin"), "example".to_string());
+    ///
+    /// artifact.declare(".my_section", Decl::section(SectionKind::Data)).unwrap();
+    ///
+    /// let mut section_symbols = BTreeMap::new();
+    /// section_symbols.insert("a_symbol".to_string(), 2);
+    /// artifact.define_with_symbols(".my_section", vec![0xde, 0xad, 0xbe, 0xef], section_symbols).unwrap();
+    ///
+    /// let _blob = artifact.emit().unwrap();
+    /// ```
     pub fn define_with_symbols<T: AsRef<str>>(
         &mut self,
         name: T,
