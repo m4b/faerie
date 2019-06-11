@@ -51,6 +51,7 @@ type StrtableOffset = u64;
 const CODE_SECTION_INDEX: SectionIndex = 0;
 const DATA_SECTION_INDEX: SectionIndex = 1;
 const CSTRING_SECTION_INDEX: SectionIndex = 2;
+const NUM_DEFAULT_SECTIONS: SectionIndex = 3;
 
 /// A builder for creating a 32/64 bit Mach-o Nlist symbol
 #[derive(Debug)]
@@ -455,9 +456,12 @@ impl SegmentBuilder {
         sections.insert(sectname.to_string(), section);
     }
     fn build_custom_section(
+        symtab: &mut SymbolTable,
         sections: &mut IndexMap<String, SectionBuilder>,
         offset: &mut u64,
         addr: &mut u64,
+        symbol_offset: &mut u64,
+        section_idx: SectionIndex,
         def: &Definition,
     ) {
         let s = match def.decl {
@@ -483,7 +487,20 @@ impl SegmentBuilder {
             flags |= S_ATTR_DEBUG;
         }
 
+        for (symbol, symbol_dst_offset) in def.symbols {
+            symtab.insert(
+                symbol,
+                SymbolType::Defined {
+                    section: section_idx,
+                    segment_relative_offset: *symbol_dst_offset,
+                    absolute_offset: *symbol_offset + *symbol_dst_offset,
+                    global: true,
+                },
+            );
+        }
+
         let local_size = def.data.len() as u64;
+        *symbol_offset += local_size;
         let section = SectionBuilder::new(sectname, segment_name, local_size)
             .offset(*offset)
             .addr(*addr)
@@ -547,8 +564,16 @@ impl SegmentBuilder {
             0,
             Some(S_CSTRING_LITERALS),
         );
-        for def in custom_sections {
-            Self::build_custom_section(&mut sections, &mut offset, &mut size, def);
+        for (idx, def) in custom_sections.iter().enumerate() {
+            Self::build_custom_section(
+                symtab,
+                &mut sections,
+                &mut offset,
+                &mut size,
+                &mut symbol_offset,
+                idx + NUM_DEFAULT_SECTIONS,
+                def,
+            );
         }
         for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
