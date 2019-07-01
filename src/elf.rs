@@ -37,6 +37,29 @@ type Relocation = goblin::elf::reloc::Reloc;
 type Symbol = goblin::elf::sym::Sym;
 type Section = SectionHeader;
 
+/// When we have a link from a function on X86,
+/// we create a relocation entry that modifies
+/// the PC-relative 32-bit immedaite value of an instruction. (e.g.'call')
+/// This value is relative to the address of the *next* instruction - e.g.
+/// 4 bytes past the start of the immediate.
+/// For example, if we have instruction 'call 0x0', encoded as:
+/// 'e8 00 00 00 00'
+/// 'WW XX YY ZZ' // some other instruction
+///
+/// the offset will computed relative to the address of 'WW'
+/// However, when the dynamic linker uses our relocation entry,
+/// it will interpet it relative to the location we're modifiying -
+/// i.e. the address of the '00' byte following the 'e8' byte.
+/// This will cause the final computed value to be 4 bytes greater
+/// than it should be. To fix this, we use an addend of '-4' to
+/// account for the extra 4 bytes between the location we're relocating
+/// (the immediate value of the instruction) and the address of the instruction
+/// immediately following it.
+///
+/// If a a consumer of 'faerie' provides their own addend via
+/// Reloc::Data, we simply add this to '-4'
+const X64_IMM_OFFSET: i32 = -4;
+
 struct MachineTag(u16);
 
 impl From<Architecture> for MachineTag {
@@ -648,9 +671,15 @@ impl<'a> Elf<'a> {
                             // NB: this now forces _all_ function references, whether local or not, through the PLT
                             // although we're not in the worst company here: https://github.com/ocaml/ocaml/pull/1330
                             Decl::Defined(DefinedDecl::Function { .. })
-                            | Decl::Import(ImportKind::Function) => (reloc::R_X86_64_PLT32, -4),
-                            Decl::Defined(DefinedDecl::Data { .. }) => (reloc::R_X86_64_PC32, -4),
-                            Decl::Import(ImportKind::Data) => (reloc::R_X86_64_GOTPCREL, -4),
+                            | Decl::Import(ImportKind::Function) => {
+                                (reloc::R_X86_64_PLT32, X64_IMM_OFFSET)
+                            }
+                            Decl::Defined(DefinedDecl::Data { .. }) => {
+                                (reloc::R_X86_64_PC32, X64_IMM_OFFSET)
+                            }
+                            Decl::Import(ImportKind::Data) => {
+                                (reloc::R_X86_64_GOTPCREL, X64_IMM_OFFSET)
+                            }
                             _ => panic!("unsupported relocation {:?}", l),
                         }
                     }
@@ -671,6 +700,46 @@ impl<'a> Elf<'a> {
                 8 => (reloc::R_X86_64_64, addend),
                 _ => panic!("unsupported relocation {:?}", l),
             },
+            Reloc::Data { addend } => {
+                match *l.to.decl {
+                    Decl::Defined(DefinedDecl::Data { .. })
+                    | Decl::Import(ImportKind::Data { .. }) => {}
+                    _ => panic!("unsupported relocation {:?}", l.to.decl),
+                };
+
+                match *l.from.decl {
+                    Decl::Defined(DefinedDecl::Function { .. }) => match *l.to.decl {
+                        Decl::Defined(DefinedDecl::Data { .. }) => {
+                            // We're referencing a symbol that we've directly
+                            // defined, so we're not going through the GOT.
+                            // This means that the addend will be applied
+                            // directly to the address of the target symbol,
+                            // which can be used to reference a specific location
+                            // within the target (e.g. a particular element of an array)
+                            (reloc::R_X86_64_PC32, X64_IMM_OFFSET + addend)
+                        }
+                        Decl::Import(ImportKind::Data) => {
+                            // If we're linking to an imported symbol,
+                            // we're creating a GOT-relative relocation.
+                            // Having a user-supplied addend doesn't make sense here,
+                            // as it would cause us to move within the GOT itself -
+                            // not relative to the address stored in the GOT entry.
+                            assert!(addend == 0, "Addend must be 0 for reloc {:?}", l);
+                            (reloc::R_X86_64_GOTPCREL, X64_IMM_OFFSET + addend)
+                        }
+                        _ => panic!("unsupported relocation {:?}", l),
+                    },
+                    Decl::Defined(DefinedDecl::Data { .. }) => {
+                        if self.ctx.is_big() {
+                            // Select an absolute relocation that is the size of a pointer.
+                            (reloc::R_X86_64_64, addend)
+                        } else {
+                            (reloc::R_X86_64_32, addend)
+                        }
+                    }
+                    _ => panic!("unsupported relocation {:?}", l),
+                }
+            }
         };
         let addend = i64::from(addend);
 

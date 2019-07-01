@@ -39,6 +39,11 @@ pub enum Reloc {
         /// Addend for the relocation
         addend: i32,
     },
+    /// A relocation in the data section.
+    Data {
+        /// Addend for the relocation
+        addend: i32,
+    },
 }
 
 type StringID = usize;
