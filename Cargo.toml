@@ -1,6 +1,6 @@
 [package]
 name = "faerie"
-version = "0.10.0"
+version = "0.10.1"
 authors = ["m4b <m4b.github.io@gmail.com>", "Dan Gohman <sunfish@mozilla.com>", "Pat Hickey <pat@moreproductive.org>", "Philip Craig <philipjcraig@gmail.com>"]
 readme = "README.md"
 keywords = ["elf", "mach-o", "binary", "object", "compiler"]
@@ -17,7 +17,7 @@ name = "prototype"
 path = "src/bin/main.rs"
 
 [dependencies]
-goblin = "0.0.21"
+goblin = "0.0.23"
 scroll = "0.9"
 log = "0.4"
 env_logger = "0.6"

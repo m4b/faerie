@@ -444,7 +444,7 @@ impl<'a> Elf<'a> {
             );
         }
 
-        let sizeof_bits = Header::size(&ctx);
+        let sizeof_bits = Header::size(ctx);
         Elf {
             name: &artifact.name,
             code: IndexMap::new(),
@@ -804,7 +804,7 @@ impl<'a> Elf<'a> {
         file.iowrite_with(header, self.ctx)?;
         let after_header = file.seek(Current(0))?;
         debug!("after_header {:#x}", after_header);
-        assert_eq!(after_header, Header::size(&self.ctx) as u64);
+        assert_eq!(after_header, Header::size(self.ctx) as u64);
 
         /////////////////////////////////////
         // Code
@@ -937,7 +937,7 @@ impl<'a> Elf<'a> {
             debug!(
                 "after_symtab_shndx {:#x} - shdr_size {}",
                 after_symtab_shndx,
-                Section::size(&self.ctx)
+                Section::size(self.ctx)
             );
             assert_eq!(after_symtab_shndx, reloc_offset);
         }
@@ -975,7 +975,7 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         // Sections
         /////////////////////////////////////
-        let sizeof_shdr = Section::size(&self.ctx) as u64;
+        let sizeof_shdr = Section::size(self.ctx) as u64;
         let shdr_size = section_headers.len() as u64 * sizeof_shdr;
 
         file.seek(Start(sh_offset))?;

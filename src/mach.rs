@@ -655,7 +655,7 @@ impl<'a> Mach<'a> {
         }
     }
     fn header(&self, sizeofcmds: u64) -> Header {
-        let mut header = Header::new(&self.ctx);
+        let mut header = Header::new(self.ctx);
         header.filetype = MH_OBJECT;
         // safe to divide up the sections into sub-sections via symbols for dead code stripping
         header.flags = MH_SUBSECTIONS_VIA_SYMBOLS;

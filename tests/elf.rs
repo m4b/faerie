@@ -313,10 +313,9 @@ fn extended_symtab_issue_76() {
     match elf {
         goblin::Object::Elf(elf) => {
             assert_eq!(elf.header.e_shnum, 0);
-            // FIXME: once goblin is patched this will fail, and we replace with approximately 0x1000
-            assert_eq!(elf.section_headers.len(), 0);
+            assert_eq!(elf.section_headers.len(), 65541);
             assert_eq!(elf.shdr_relocs.len(), 0);
-            assert_eq!(elf.syms.len(), 0);
+            assert_eq!(elf.syms.len(), 131074);
         }
         _ => {
             panic!("Elf file not parsed as elf file");
