@@ -523,12 +523,12 @@ impl Artifact {
 
     /// Emit and write to disk a blob of bytes representing the object file in the format specified
     /// in the target the `Artifact` was constructed with.
-    pub fn write(&self, sink: File) -> Result<(), Error> {
+    pub fn write(&self, sink: &File) -> Result<(), Error> {
         self.write_as(sink, self.target.binary_format)
     }
 
     /// Emit and write to disk a blob of bytes representing an object file in the given format.
-    pub fn write_as(&self, mut sink: File, format: BinaryFormat) -> Result<(), Error> {
+    pub fn write_as(&self, mut sink: &File, format: BinaryFormat) -> Result<(), Error> {
         let bytes = self.emit_as(format)?;
         sink.write_all(&bytes)?;
         Ok(())

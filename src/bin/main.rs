@@ -179,7 +179,7 @@ fn run (args: Args) -> Result<(), Error> {
     obj.link(Link { from: "STATIC_REF", to: "STATIC", at: 0 })?;
 
     // Finally, we emit the object file
-    obj.write(file)?;
+    obj.write(&file)?;
     if let Some(output) = args.link {
         link(&args.filename, &output, &args.linkline)?;
     }
@@ -356,7 +356,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
         obj.define(".debug_info", debug_info)?;
     }
 
-    obj.write(file)?;
+    obj.write(&file)?;
     if let Some(output) = args.link {
         link(&args.filename, &output, &args.linkline)?;
     }
