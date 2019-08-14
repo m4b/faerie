@@ -3,7 +3,6 @@ extern crate faerie;
 extern crate failure;
 extern crate goblin;
 extern crate structopt;
-extern crate structopt_derive;
 extern crate target_lexicon;
 
 use failure::Error;
