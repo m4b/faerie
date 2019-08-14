@@ -13,6 +13,6 @@ before_script:
 script:
   - cargo fmt -- --check
   - cargo test
-  - cargo run -- --deadbeef deadbeef.o
-  - cargo run -- --link test test.o deadbeef.o
+  - cargo run --example prototype -- --deadbeef deadbeef.o
+  - cargo run --example prototype -- --link test test.o deadbeef.o
   - ./test

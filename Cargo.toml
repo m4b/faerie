@@ -12,18 +12,15 @@ categories = ["development-tools::debugging"]
 include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md", "tests/*"]
 edition = "2018"
 
-[[bin]]
-name = "prototype"
-path = "src/bin/main.rs"
-
 [dependencies]
 goblin = "0.0.23"
 scroll = "0.9"
 log = "0.4"
-env_logger = "0.6"
 indexmap = "1"
-structopt = "0.2"
-structopt-derive = "0.2"
 string-interner = "0.6"
 failure = "0.1"
 target-lexicon = "0.4.0"
+
+[dev-dependencies]
+env_logger = "0.6"
+structopt = "0.2"
