@@ -830,6 +830,7 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                 // NB: we currently deduce the meaning of our relocation from from decls -> to decl relocations
                 // e.g., global static data references, are constructed from Data -> Data links
                 match (link.from.decl, link.to.decl) {
+                    // from/to debug section
                     (Decl::Defined(DefinedDecl::Section(s)), _)
                         if s.kind() == SectionKind::Debug =>
                     {
@@ -842,32 +843,30 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
                         panic!("invalid DebugSection link")
                     }
 
+                    // from/to custom section
                     (Decl::Defined(DefinedDecl::Section(_)), _)
                     | (_, Decl::Defined(DefinedDecl::Section(_))) => {
                         panic!("relocations are not yet supported for custom sections")
                     }
-                    // various static function pointers in the .data section
-                    (
-                        Decl::Defined(DefinedDecl::Data { .. }),
-                        Decl::Defined(DefinedDecl::Function { .. }),
-                    ) => (true, X86_64_RELOC_UNSIGNED),
-                    (
-                        Decl::Defined(DefinedDecl::Data { .. }),
-                        Decl::Import(ImportKind::Function { .. }),
-                    ) => (true, X86_64_RELOC_UNSIGNED),
-                    // anything else is just a regular relocation/callq
-                    (_, Decl::Defined(DefinedDecl::Function { .. })) => {
-                        (false, X86_64_RELOC_BRANCH)
+
+                    // from data object
+                    (Decl::Defined(DefinedDecl::Data { .. }), _) => (true, X86_64_RELOC_UNSIGNED),
+
+                    // from function
+                    (Decl::Defined(DefinedDecl::Function { .. }), to) => match to {
+                        Decl::Defined(DefinedDecl::Function { .. }) => (false, X86_64_RELOC_BRANCH),
+                        Decl::Import(ImportKind::Function) => (false, X86_64_RELOC_BRANCH),
+
+                        Decl::Defined(DefinedDecl::Data { .. }) => (false, X86_64_RELOC_SIGNED),
+                        Decl::Import(ImportKind::Data) => (false, X86_64_RELOC_GOT_LOAD),
+
+                        // handled above
+                        Decl::Defined(DefinedDecl::Section { .. }) => unreachable!(),
+                    },
+
+                    (Decl::Import(_), _) => {
+                        unreachable!("Tried to relocate import???");
                     }
-                    // we are a relocation in the data section to another object
-                    // in the data section, e.g., a static reference
-                    (
-                        Decl::Defined(DefinedDecl::Data { .. }),
-                        Decl::Defined(DefinedDecl::Data { .. }),
-                    ) => (true, X86_64_RELOC_UNSIGNED),
-                    (_, Decl::Defined(DefinedDecl::Data { .. })) => (false, X86_64_RELOC_SIGNED),
-                    (_, Decl::Import(ImportKind::Function)) => (false, X86_64_RELOC_BRANCH),
-                    (_, Decl::Import(ImportKind::Data)) => (false, X86_64_RELOC_GOT_LOAD),
                 }
             }
             Reloc::Raw { reloc, addend } => {
