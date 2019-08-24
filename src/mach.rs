@@ -436,35 +436,16 @@ impl SegmentBuilder {
         min_alignment_exponent: u64,
         flags: Option<u32>,
         align_pad_map: &mut HashMap<String, u64>,
-        segment_relative_offset: &mut u64,
     ) {
         let mut local_size = 0;
         let mut section_relative_offset = 0;
         let mut alignment_exponent = min_alignment_exponent;
-        for def in definitions {
+        let mut def_iter = definitions.iter().peekable();
+        while let Some(def) = def_iter.next() {
             if let DefinedDecl::Section { .. } = def.decl {
                 unreachable!();
             }
 
-            let def_alignment_exponent = std::cmp::max(
-                min_alignment_exponent,
-                align_to_align_exp(def.decl.get_align().unwrap_or(1)),
-            );
-            alignment_exponent = std::cmp::max(alignment_exponent, def_alignment_exponent);
-
-            let align_pad = (2 << def_alignment_exponent) - (*segment_relative_offset % (2 << def_alignment_exponent));
-            let align_pad = if align_pad == (2 << def_alignment_exponent) {
-                0
-            } else {
-                align_pad
-            };
-            align_pad_map.insert(def.name.to_string(), align_pad);
-
-            *symbol_offset += align_pad;
-            section_relative_offset += align_pad;
-            *segment_relative_offset += align_pad;
-
-            local_size += align_pad + def.data.len() as u64;
             symtab.insert(
                 def.name,
                 SymbolType::Defined {
@@ -476,7 +457,25 @@ impl SegmentBuilder {
             );
             *symbol_offset += def.data.len() as u64;
             section_relative_offset += def.data.len() as u64;
-            *segment_relative_offset += def.data.len() as u64;
+            local_size += def.data.len() as u64;
+
+            let next_def_alignment_exponent = std::cmp::max(
+                min_alignment_exponent,
+                def_iter.peek().map(|def| align_to_align_exp(def.decl.get_align().unwrap_or(1))).unwrap_or(0)
+            );
+            alignment_exponent = std::cmp::max(alignment_exponent, next_def_alignment_exponent);
+
+            let align_pad = (1 << next_def_alignment_exponent) - (section_relative_offset % (1 << next_def_alignment_exponent));
+            let align_pad = if align_pad == (1 << next_def_alignment_exponent) {
+                0
+            } else {
+                align_pad
+            };
+            align_pad_map.insert(def.name.to_string(), align_pad);
+
+            *symbol_offset += align_pad;
+            section_relative_offset += align_pad;
+            local_size += align_pad;
         }
         let mut section = SectionBuilder::new(sectname.to_string(), segname, local_size)
             .offset(*offset)
@@ -560,7 +559,6 @@ impl SegmentBuilder {
         let mut symbol_offset = 0;
         let mut sections = IndexMap::new();
         let mut align_pad_map = HashMap::new();
-        let mut segment_relative_offset = 0;
         Self::build_section(
             symtab,
             "__text",
@@ -574,7 +572,6 @@ impl SegmentBuilder {
             4,
             Some(S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS),
             &mut align_pad_map,
-            &mut segment_relative_offset,
         );
         Self::build_section(
             symtab,
@@ -589,7 +586,6 @@ impl SegmentBuilder {
             3,
             None,
             &mut align_pad_map,
-            &mut segment_relative_offset,
         );
         Self::build_section(
             symtab,
@@ -604,7 +600,6 @@ impl SegmentBuilder {
             0,
             Some(S_CSTRING_LITERALS),
             &mut align_pad_map,
-            &mut segment_relative_offset,
         );
         for (idx, def) in custom_sections.iter().enumerate() {
             Self::build_custom_section(
@@ -784,13 +779,15 @@ impl<'a> Mach<'a> {
         // write code
         //////////////////////////////
         for code in self.code {
+            file.write_all(code.data)?;
+
             if let Some(&align_pad) = self.segment.align_pad_map.get(code.name) {
                 for _ in 0..align_pad {
-                    file.write_all(&[0xaa])?;
+                    // `0xcc` generates a debug interrupt on x86. When there is no debugger attached
+                    // this will abort the program.
+                    file.write_all(&[0xcc])?;
                 }
             }
-
-            file.write_all(code.data)?;
         }
         debug!("SEEK: after code: {}", file.seek(Current(0))?);
 
@@ -798,13 +795,13 @@ impl<'a> Mach<'a> {
         // write data
         //////////////////////////////
         for data in self.data {
+            file.write_all(data.data)?;
+
             if let Some(&align_pad) = self.segment.align_pad_map.get(data.name) {
                 for _ in 0..align_pad {
                     file.write_all(&[0xaa])?;
                 }
             }
-
-            file.write_all(data.data)?;
         }
         debug!("SEEK: after data: {}", file.seek(Current(0))?);
 
@@ -812,13 +809,13 @@ impl<'a> Mach<'a> {
         // write cstrings
         //////////////////////////////
         for cstring in self.cstrings {
+            file.write_all(cstring.data)?;
+
             if let Some(&align_pad) = self.segment.align_pad_map.get(cstring.name) {
                 for _ in 0..align_pad {
                     file.write_all(&[0xaa])?;
                 }
             }
-
-            file.write_all(cstring.data)?;
         }
         debug!("SEEK: after cstrings: {}", file.seek(Current(0))?);
 
@@ -826,13 +823,13 @@ impl<'a> Mach<'a> {
         // write custom sections
         //////////////////////////////
         for section in self.sections {
+            file.write_all(section.data)?;
+
             if let Some(&align_pad) = self.segment.align_pad_map.get(section.name) {
                 for _ in 0..align_pad {
                     file.write_all(&[0xaa])?;
                 }
             }
-
-            file.write_all(section.data)?;
         }
         debug!("SEEK: after custom sections: {}", file.seek(Current(0))?);
 
