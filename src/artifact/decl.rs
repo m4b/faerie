@@ -219,7 +219,7 @@ impl DefinedDecl {
         }
     }
 
-    /// Accessir to determine the minimal alignment
+    /// Accessor to determine the minimal alignment
     pub fn get_align(&self) -> Option<u64> {
         match self {
             DefinedDecl::Data(a) => a.get_align(),
