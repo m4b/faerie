@@ -86,7 +86,7 @@ fn run (args: Args) -> Result<(), Error> {
         ("str.1", Decl::cstring().into()),
         ("DEADBEEF", Decl::data_import().into()),
         ("STATIC", Decl::data().global().writable().into()),
-        ("STATIC_REF", Decl::data().global().writable().into()),
+        ("STATIC_REF", Decl::data().global().writable().with_align(Some(64)).into()),
         ("printf", Decl::function_import().into()),
     ];
     obj.declarations(declarations.into_iter())?;

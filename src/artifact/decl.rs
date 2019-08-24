@@ -147,8 +147,8 @@ macro_rules! align_methods {
     () => {
     /// Build alignment. Size is in bytes. If None, a default is chosen
     /// in the backend.
-    pub fn with_align(mut self, align: Option<u64>) -> Self {
-        self.set_align(align);
+    pub fn with_align(mut self, align: Option<usize>) -> Self {
+        self.set_align(align.map(|align| align as u64));
         self
     }
     /// Set alignment
