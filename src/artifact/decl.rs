@@ -147,16 +147,19 @@ macro_rules! align_methods {
     () => {
     /// Build alignment. Size is in bytes. If None, a default is chosen
     /// in the backend.
-    pub fn with_align(mut self, align: Option<usize>) -> Self {
-        self.align = align;
+    pub fn with_align(mut self, align: Option<u64>) -> Self {
+        self.set_align(align);
         self
     }
     /// Set alignment
-    pub fn set_align(&mut self, align: Option<usize>) {
+    pub fn set_align(&mut self, align: Option<u64>) {
+        if let Some(align) = align {
+            debug_assert_eq!(align.checked_next_power_of_two(), Some(align));
+        }
         self.align = align;
     }
     /// Get alignment
-    pub fn get_align(&self) -> Option<usize> {
+    pub fn get_align(&self) -> Option<u64> {
         self.align
     }
     }
@@ -213,6 +216,15 @@ impl DefinedDecl {
             DefinedDecl::Data(a) => a.is_writable(),
             DefinedDecl::Function(_) => false,
             DefinedDecl::Section(a) => a.is_writable(),
+        }
+    }
+
+    /// Accessir to determine the minimal alignment
+    pub fn get_align(&self) -> Option<u64> {
+        match self {
+            DefinedDecl::Data(a) => a.get_align(),
+            DefinedDecl::Function(a) => a.get_align(),
+            DefinedDecl::Section(a) => a.get_align(),
         }
     }
 }
@@ -387,7 +399,7 @@ impl Into<Decl> for DataImportDecl {
 pub struct FunctionDecl {
     scope: Scope,
     visibility: Visibility,
-    align: Option<usize>,
+    align: Option<u64>,
 }
 
 impl Default for FunctionDecl {
@@ -419,7 +431,7 @@ pub struct DataDecl {
     visibility: Visibility,
     writable: bool,
     datatype: DataType,
-    align: Option<usize>,
+    align: Option<u64>,
 }
 
 impl Default for DataDecl {
@@ -487,7 +499,7 @@ pub enum SectionKind {
 pub struct SectionDecl {
     kind: SectionKind,
     datatype: DataType,
-    align: Option<usize>,
+    align: Option<u64>,
 }
 
 impl SectionDecl {

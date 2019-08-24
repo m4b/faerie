@@ -45,6 +45,16 @@ impl From<Architecture> for CpuType {
     }
 }
 
+fn align_to_align_exp(align: u64) -> u64 {
+    assert!(align != 0);
+    assert!(align.is_power_of_two());
+    let mut align_exp = 0;
+    while 1 << align_exp != align {
+        align_exp += 1;
+    }
+    align_exp
+}
+
 type SectionIndex = usize;
 type StrtableOffset = u64;
 
@@ -422,11 +432,12 @@ impl SegmentBuilder {
         symbol_offset: &mut u64,
         section: SectionIndex,
         definitions: &[Definition],
-        alignment_exponent: u64,
+        min_alignment_exponent: u64,
         flags: Option<u32>,
     ) {
         let mut local_size = 0;
         let mut segment_relative_offset = 0;
+        let mut alignment_exponent = min_alignment_exponent;
         for def in definitions {
             if let DefinedDecl::Section { .. } = def.decl {
                 unreachable!();
@@ -443,6 +454,9 @@ impl SegmentBuilder {
             );
             *symbol_offset += def.data.len() as u64;
             segment_relative_offset += def.data.len() as u64;
+            if let Some(align) = def.decl.get_align() {
+                alignment_exponent = std::cmp::max(alignment_exponent, align_to_align_exp(align));
+            }
         }
         let mut section = SectionBuilder::new(sectname.to_string(), segname, local_size)
             .offset(*offset)
@@ -504,7 +518,7 @@ impl SegmentBuilder {
         let section = SectionBuilder::new(sectname, segment_name, local_size)
             .offset(*offset)
             .addr(*addr)
-            .align(1)
+            .align(align_to_align_exp(s.get_align().unwrap_or(1)))
             .flags(flags);
         *offset += local_size;
         *addr += local_size;
