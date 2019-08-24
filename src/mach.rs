@@ -461,11 +461,15 @@ impl SegmentBuilder {
 
             let next_def_alignment_exponent = std::cmp::max(
                 min_alignment_exponent,
-                def_iter.peek().map(|def| align_to_align_exp(def.decl.get_align().unwrap_or(1))).unwrap_or(0)
+                def_iter
+                    .peek()
+                    .map(|def| align_to_align_exp(def.decl.get_align().unwrap_or(1)))
+                    .unwrap_or(0),
             );
             alignment_exponent = std::cmp::max(alignment_exponent, next_def_alignment_exponent);
 
-            let align_pad = (1 << next_def_alignment_exponent) - (section_relative_offset % (1 << next_def_alignment_exponent));
+            let align_pad = (1 << next_def_alignment_exponent)
+                - (section_relative_offset % (1 << next_def_alignment_exponent));
             let align_pad = if align_pad == (1 << next_def_alignment_exponent) {
                 0
             } else {
