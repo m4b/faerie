@@ -803,6 +803,9 @@ impl<'a> Mach<'a> {
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(data.name) {
                 for _ in 0..align_pad {
+                    // Exact padding value doesn't matter. Not using zero to prevent confusion
+                    // with a zero pointer when the final executable accidentially reads past
+                    // the end of a data object.
                     file.write_all(&[0xaa])?;
                 }
             }
@@ -817,6 +820,7 @@ impl<'a> Mach<'a> {
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(cstring.name) {
                 for _ in 0..align_pad {
+                    // See comment above for explanation of 0xaa
                     file.write_all(&[0xaa])?;
                 }
             }
@@ -831,6 +835,7 @@ impl<'a> Mach<'a> {
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(section.name) {
                 for _ in 0..align_pad {
+                    // See comment above for explanation of 0xaa
                     file.write_all(&[0xaa])?;
                 }
             }
