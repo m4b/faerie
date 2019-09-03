@@ -2,7 +2,7 @@
 
 use failure::Error;
 use indexmap::IndexMap;
-use string_interner::DefaultStringInterner;
+use string_interner::StringInterner;
 use target_lexicon::{BinaryFormat, Triple};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -144,8 +144,8 @@ pub(crate) struct Definition<'a> {
     pub decl: &'a DefinedDecl,
 }
 
-impl<'a> From<(&'a InternalDefinition, &'a DefaultStringInterner)> for Definition<'a> {
-    fn from((def, strings): (&'a InternalDefinition, &'a DefaultStringInterner)) -> Self {
+impl<'a> From<(&'a InternalDefinition, &'a StringInterner<StringID>)> for Definition<'a> {
+    fn from((def, strings): (&'a InternalDefinition, &'a StringInterner<StringID>)) -> Self {
         Definition {
             name: strings
                 .resolve(def.name)
@@ -217,7 +217,7 @@ pub struct Artifact {
     declarations: IndexMap<StringID, InternalDecl>,
     local_definitions: BTreeSet<InternalDefinition>,
     nonlocal_definitions: BTreeSet<InternalDefinition>,
-    strings: DefaultStringInterner,
+    strings: StringInterner<StringID>,
 }
 
 // api less subject to change
@@ -233,7 +233,7 @@ impl Artifact {
             declarations: IndexMap::new(),
             local_definitions: BTreeSet::new(),
             nonlocal_definitions: BTreeSet::new(),
-            strings: DefaultStringInterner::default(),
+            strings: StringInterner::new(),
         }
     }
     /// Get an iterator over this artifact's imports

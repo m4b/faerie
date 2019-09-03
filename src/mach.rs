@@ -10,7 +10,7 @@ use scroll::ctx::SizeWith;
 use scroll::{IOwrite, Pwrite};
 use std::io::SeekFrom::*;
 use std::io::{BufWriter, Cursor, Seek, Write};
-use string_interner::DefaultStringInterner;
+use string_interner::StringInterner;
 use target_lexicon::Architecture;
 
 use goblin::mach::constants::{
@@ -285,16 +285,28 @@ type ArtifactCode<'a> = Vec<Definition<'a>>;
 type ArtifactData<'a> = Vec<Definition<'a>>;
 
 type StrTableIndex = usize;
-type StrTable = DefaultStringInterner;
+type StrTable = StringInterner<StrTableIndex>;
 type Symbols = IndexMap<StrTableIndex, SymbolBuilder>;
 
 /// A mach object symbol table
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SymbolTable {
     symbols: Symbols,
     strtable: StrTable,
     indexes: IndexMap<StrTableIndex, SymbolIndex>,
     strtable_size: StrtableOffset,
+}
+
+// A manual implementation for Default because StringInterner<usize> does not have a Default impl:
+impl Default for SymbolTable {
+    fn default() -> Self {
+        Self {
+            symbols: Symbols::default(),
+            strtable: StrTable::new(),
+            indexes: IndexMap::default(),
+            strtable_size: StrtableOffset::default(),
+        }
+    }
 }
 
 /// The kind of symbol this is
@@ -314,7 +326,7 @@ enum SymbolType {
 impl SymbolTable {
     /// Create a new symbol table. The first strtable entry (like ELF) is always nothing
     pub fn new() -> Self {
-        let mut strtable = StrTable::default();
+        let mut strtable = StrTable::new();
         strtable.get_or_intern("");
         let strtable_size = 1;
         SymbolTable {
