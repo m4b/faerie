@@ -1,6 +1,6 @@
 [package]
 name = "faerie"
-version = "0.10.2"
+version = "0.11.0"
 authors = ["m4b <m4b.github.io@gmail.com>", "Dan Gohman <sunfish@mozilla.com>", "Pat Hickey <pat@moreproductive.org>", "Philip Craig <philipjcraig@gmail.com>", "bjorn3 <bjorn3@users.noreply.github.com>"]
 readme = "README.md"
 keywords = ["elf", "mach-o", "binary", "object", "compiler"]
