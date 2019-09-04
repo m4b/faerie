@@ -22,7 +22,7 @@ use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::io::SeekFrom::*;
 use std::io::{BufWriter, Cursor, Seek, Write};
-use string_interner::DefaultStringInterner;
+use string_interner::StringInterner;
 use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
@@ -386,7 +386,7 @@ struct Elf<'a> {
     sections: IndexMap<StringIndex, SectionInfo>,
     offsets: HashMap<StringIndex, Offset>,
     sizeof_strtab: Offset,
-    strings: DefaultStringInterner,
+    strings: StringInterner<StringIndex>,
     sizeof_bits: Offset,
     nsections: u32,
     ctx: Ctx,
@@ -417,7 +417,7 @@ impl<'a> Elf<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         let mut offsets = HashMap::new();
-        let mut strings = DefaultStringInterner::default();
+        let mut strings: StringInterner<usize> = StringInterner::new();
         let mut special_symbols = Vec::new();
         let mut sizeof_strtab = 1;
 
