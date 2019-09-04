@@ -207,7 +207,7 @@ struct SectionBuilder {
     alloc: bool,
     size: u64,
     name_offset: usize,
-    align: Option<usize>,
+    align: Option<u64>,
 }
 
 impl SectionBuilder {
@@ -239,7 +239,7 @@ impl SectionBuilder {
         self
     }
     /// Specify section alignment
-    pub fn align(mut self, align: Option<usize>) -> Self {
+    pub fn align(mut self, align: Option<u64>) -> Self {
         self.align = align;
         self
     }
