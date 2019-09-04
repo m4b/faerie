@@ -13,13 +13,13 @@ include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md", "tests/*"]
 edition = "2018"
 
 [dependencies]
-goblin = "0.0.23"
+goblin = "0.0.24"
 scroll = "0.9"
 log = "0.4"
 indexmap = "1"
 string-interner = "0.7.1"
 failure = "0.1"
-target-lexicon = "0.4.0"
+target-lexicon = "0.8.0"
 
 [dev-dependencies]
 env_logger = "0.6"

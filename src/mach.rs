@@ -32,10 +32,8 @@ impl From<Architecture> for CpuType {
         CpuType(match architecture {
             X86_64 => CPU_TYPE_X86_64,
             I386 | I586 | I686 => CPU_TYPE_X86,
-            Aarch64 => CPU_TYPE_ARM64,
-            Arm | Armv4t | Armv5te | Armv7 | Armv7s | Thumbv6m | Thumbv7em | Thumbv7m => {
-                CPU_TYPE_ARM
-            }
+            Aarch64(_) => CPU_TYPE_ARM64,
+            Arm(_) => CPU_TYPE_ARM,
             Sparc => CPU_TYPE_SPARC,
             Powerpc => CPU_TYPE_POWERPC,
             Powerpc64 | Powerpc64le => CPU_TYPE_POWERPC64,

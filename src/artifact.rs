@@ -237,14 +237,14 @@ impl Artifact {
         }
     }
     /// Get an iterator over this artifact's imports
-    pub fn imports<'a>(&'a self) -> Box<Iterator<Item = (&'a str, &'a ImportKind)> + 'a> {
+    pub fn imports<'a>(&'a self) -> Box<dyn Iterator<Item = (&'a str, &'a ImportKind)> + 'a> {
         Box::new(
             self.imports
                 .iter()
                 .map(move |&(id, ref kind)| (self.strings.resolve(id).unwrap(), kind)),
         )
     }
-    pub(crate) fn definitions<'a>(&'a self) -> Box<Iterator<Item = Definition<'a>> + 'a> {
+    pub(crate) fn definitions<'a>(&'a self) -> Box<dyn Iterator<Item = Definition<'a>> + 'a> {
         Box::new(
             self.local_definitions
                 .iter()
@@ -253,7 +253,7 @@ impl Artifact {
         )
     }
     /// Get this artifacts relocations
-    pub(crate) fn links<'a>(&'a self) -> Box<Iterator<Item = LinkAndDecl<'a>> + 'a> {
+    pub(crate) fn links<'a>(&'a self) -> Box<dyn Iterator<Item = LinkAndDecl<'a>> + 'a> {
         Box::new(
             self.links
                 .iter()

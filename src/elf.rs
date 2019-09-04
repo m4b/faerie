@@ -46,18 +46,23 @@ impl From<Architecture> for MachineTag {
         MachineTag(match architecture {
             X86_64 => EM_X86_64,
             I386 | I586 | I686 => EM_386,
-            Aarch64 => EM_AARCH64,
-            Arm | Armebv7r | Armv4t | Armv5te | Armv6 | Armv7 | Armv7r | Armv7s | Thumbv6m
-            | Thumbv7a | Thumbv7em | Thumbv7neon | Thumbv7m | Thumbv8mBase | Thumbv8mMain => EM_ARM,
-            Mips | Mipsel | Mips64 | Mips64el => EM_MIPS,
+            Aarch64(_) => EM_AARCH64,
+            Arm(_) => EM_ARM,
+            Mips | Mipsel | Mips64 | Mips64el | Mipsisa32r6 | Mipsisa32r6el | Mipsisa64r6
+            | Mipsisa64r6el => EM_MIPS,
             Powerpc => EM_PPC,
             Powerpc64 | Powerpc64le => EM_PPC64,
-            Riscv32 | Riscv32imac | Riscv32imc | Riscv64 => EM_RISCV,
+            Riscv32 | Riscv32imac | Riscv32imc | Riscv64 | Riscv32i | Riscv64gc | Riscv64imac => {
+                EM_RISCV
+            }
             S390x => EM_S390,
             Sparc => EM_SPARC,
             Sparc64 | Sparcv9 => EM_SPARCV9,
             Msp430 => EM_MSP430,
             Unknown => EM_NONE,
+            Hexagon => panic!("goblin does not have EM_HEXAGON yet"),
+            Nvptx64 => panic!("nvptx64 does not exist in ELF"),
+            AmdGcn => panic!("amdgcn does not exist in ELF"),
             Asmjs => panic!("asm.js does not exist in ELF"),
             Wasm32 => panic!("wasm32 does not exist in ELF"),
         })
