@@ -2,7 +2,7 @@
 
 Emit some object files, at your leisure.
 
-For more information, [read the documentation](https://docs.rs/faerie/*/).
+For more information, [read the documentation](https://docs.rs/faerie).
 
 ```rust
 let name = "test.o";
