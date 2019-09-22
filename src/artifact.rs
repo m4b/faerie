@@ -16,8 +16,15 @@ pub use crate::artifact::decl::{
     DataType, Decl, DefinedDecl, ImportKind, Scope, SectionKind, Visibility,
 };
 
-/// A blob of binary bytes, representing a function body, or data object
-pub type Data = Vec<u8>;
+// we need Ord so that `InternalDefinition` can go in a BTreeSet
+/// The data to be stored in an artifact, representing a function body or data object.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub enum Data {
+    /// A blob of binary bytes, representing a function body, or data object
+    Blob(Vec<u8>),
+    /// Zero-initialized data with a given size. This is implemented as a .bss section.
+    ZeroInit(usize),
+}
 
 /// The kind of relocation for a link.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
@@ -95,6 +102,19 @@ struct InternalDecl {
     defined: bool,
 }
 
+impl Data {
+    /// Return the length of the data stored in this object.
+    ///
+    /// For `ZeroInit` variant, returns the amount of space
+    /// that would be taken up when the program is loaded into memory.
+    pub fn len(&self) -> usize {
+        match self {
+            Data::Blob(blob) => blob.len(),
+            Data::ZeroInit(size) => *size,
+        }
+    }
+}
+
 impl InternalDecl {
     /// Wrap up a declaration. Initially marked as not defined.
     pub fn new(decl: Decl) -> Self {
@@ -137,7 +157,7 @@ pub(crate) struct Definition<'a> {
     /// Name of symbol
     pub name: &'a str,
     /// Contents of definition
-    pub data: &'a [u8],
+    pub data: &'a Data,
     /// Custom symbols referencing this section, or none for other definition types.
     pub symbols: &'a BTreeMap<String, u64>,
     /// Declaration of symbol
@@ -356,11 +376,27 @@ impl Artifact {
         }
         Ok(())
     }
-    /// Defines a _previously declared_ program object.
+    /// Defines a _previously declared_ program object with the given data.
     /// **NB**: If you attempt to define an import, this will return an error.
     /// If you attempt to define something which has not been declared, this will return an error.
+    ///
+    /// See the documentation for [`Data`](type.Data.html) for the difference
+    /// from `define_zero_init`.
+    #[inline]
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
-        self.define_with_symbols(name, data, BTreeMap::new())
+        self.define_with_symbols(name, Data::Blob(data), BTreeMap::new())
+    }
+
+    /// Defines a _previously declared_ program object with all zeros.
+    /// **NB**: If you attempt to define an import, this will return an error.
+    /// If you attempt to define something which has not been declared, this will return an error.
+    #[inline]
+    pub fn define_zero_init<T: AsRef<str>>(
+        &mut self,
+        name: T,
+        size: usize,
+    ) -> Result<(), ArtifactError> {
+        self.define_with_symbols(name, Data::ZeroInit(size), BTreeMap::new())
     }
 
     /// Same as `define` but also allows to add custom symbols referencing a section decl.
@@ -391,7 +427,7 @@ impl Artifact {
     pub fn define_with_symbols<T: AsRef<str>>(
         &mut self,
         name: T,
-        data: Vec<u8>,
+        data: Data,
         symbols: BTreeMap<String, u64>,
     ) -> Result<(), ArtifactError> {
         let decl_name = self.strings.get_or_intern(name.as_ref());

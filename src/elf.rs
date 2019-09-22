@@ -7,7 +7,7 @@
 
 use crate::{
     artifact::{
-        self, Artifact, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
+        self, Artifact, Data, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
         Visibility,
     },
     target::make_ctx,
@@ -379,7 +379,6 @@ impl RelocationBuilder {
     }
 }
 
-//#[derive(Debug)]
 /// An intermediate ELF object file container
 struct Elf<'a> {
     name: &'a str,
@@ -526,7 +525,10 @@ impl<'a> Elf<'a> {
                 .align(d.get_align()),
         };
 
-        let shndx = self.add_progbits(section_name, section, def.data);
+        let shndx = match def.data {
+            Data::Blob(bytes) => self.add_progbits(section_name, section, bytes),
+            Data::ZeroInit(_) => unimplemented!("writing .bss section"),
+        };
 
         match decl {
             DefinedDecl::Function(_) | DefinedDecl::Data(_) => {
