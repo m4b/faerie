@@ -180,3 +180,22 @@ fn vary_output_formats() {
     }
     */
 }
+
+#[test]
+fn bss() {
+    use goblin::Object;
+    use target_lexicon::BinaryFormat;
+
+    const SIZE: usize = 100_000_000_000_000;
+
+    let mut artifact = Artifact::new(triple!("x86_64"), "bss".into());
+    artifact.declare("my_data", Decl::data().global()).unwrap();
+    artifact.define_zero_init("my_data", SIZE).unwrap();
+
+    let elf = artifact.emit_as(BinaryFormat::Elf).unwrap();
+    assert!(elf.len() < SIZE);
+    match Object::parse(&elf).unwrap() {
+        Object::Elf(elf) => assert!(!elf.syms.is_empty()),
+        _ => panic!("emitted as ELF but did not parse as ELF")
+    }
+}

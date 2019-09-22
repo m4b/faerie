@@ -1,6 +1,6 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc, SectionKind};
+use crate::artifact::{Data, DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc, SectionKind};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 

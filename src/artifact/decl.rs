@@ -123,8 +123,6 @@ pub enum DataType {
     Bytes,
     /// 0-terminated C-style string.
     String,
-    /// Zero-initialized data, stored in .bss
-    ZeroInit,
 }
 
 macro_rules! datatype_methods {

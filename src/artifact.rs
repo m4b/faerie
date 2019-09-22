@@ -119,13 +119,27 @@ impl Data {
             Data::ZeroInit(size) => *size,
         }
     }
+    /// Return whether the data has at least one byte defined
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Data::Blob(blob) => blob.is_empty(),
+            Data::ZeroInit(size) => *size == 0,
+        }
+    }
+    /// Return whether this data is a ZeroInit variant
+    pub fn is_zero_init(&self) -> bool {
+        match self {
+            Data::ZeroInit(_) => true,
+            Data::Blob(_) => false,
+        }
+    }
 }
 
 impl InternalDecl {
     /// Wrap up a declaration. Initially marked as not defined.
     pub fn new(decl: Decl) -> Self {
         Self {
-            decl: decl,
+            decl,
             defined: false,
         }
     }
@@ -418,7 +432,7 @@ impl Artifact {
     /// # use std::collections::BTreeMap;
     /// # use std::str::FromStr;
     /// #
-    /// # use faerie::{Artifact, ArtifactBuilder, Decl, Link, SectionKind};
+    /// # use faerie::{Artifact, ArtifactBuilder, Data, Decl, Link, SectionKind};
     /// #
     /// let mut artifact = Artifact::new(target_lexicon::triple!("x86_64-apple-darwin"), "example".to_string());
     ///
@@ -426,7 +440,7 @@ impl Artifact {
     ///
     /// let mut section_symbols = BTreeMap::new();
     /// section_symbols.insert("a_symbol".to_string(), 2);
-    /// artifact.define_with_symbols(".my_section", vec![0xde, 0xad, 0xbe, 0xef], section_symbols).unwrap();
+    /// artifact.define_with_symbols(".my_section", Data::Blob(vec![0xde, 0xad, 0xbe, 0xef]), section_symbols).unwrap();
     ///
     /// let _blob = artifact.emit().unwrap();
     /// ```
