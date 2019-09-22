@@ -183,7 +183,8 @@ fn vary_output_formats() {
 
 #[test]
 fn bss() {
-    use goblin::Object;
+    use std::io::Write;
+    use goblin::{Object, mach::Mach};
     use target_lexicon::BinaryFormat;
 
     const SIZE: usize = 100_000_000_000_000;
@@ -197,5 +198,14 @@ fn bss() {
     match Object::parse(&elf).unwrap() {
         Object::Elf(elf) => assert!(!elf.syms.is_empty()),
         _ => panic!("emitted as ELF but did not parse as ELF")
+    }
+
+    let mach = artifact.emit_as(BinaryFormat::Macho).unwrap();
+    let mut file = std::fs::File::create("mach.o").unwrap();
+    file.write_all(&mach).unwrap();
+    assert!(mach.len() < SIZE);
+    match Object::parse(&mach).unwrap() {
+        Object::Mach(Mach::Binary(mach)) => assert!(!mach.symbols.unwrap().iter().next().is_some()),
+        _ => panic!("emitted as MACHO but did not parse as MACHO")
     }
 }

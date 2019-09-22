@@ -172,7 +172,7 @@ pub struct LinkAndDecl<'a> {
 }
 
 /// A definition of a symbol with its properties the various backends receive
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Definition<'a> {
     /// Name of symbol
     pub name: &'a str,

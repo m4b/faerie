@@ -539,7 +539,7 @@ impl<'a> Elf<'a> {
 
         let shndx = match def.data {
             Data::Blob(bytes) => self.add_progbits(section_name, section, bytes),
-            Data::ZeroInit(size) => self.add_bss(section_name, section, *size),
+            Data::ZeroInit(_) => self.add_bss(section_name, section),
         };
 
         match decl {
@@ -606,7 +606,7 @@ impl<'a> Elf<'a> {
         shndx
     }
     /// Create a .bss section (and its section symbol) and return the section index
-    fn add_bss(&mut self, name: String, section: SectionBuilder, size: usize) -> usize {
+    fn add_bss(&mut self, name: String, section: SectionBuilder) -> usize {
         let (idx, offset) = self.new_string(name);
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab

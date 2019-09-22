@@ -60,7 +60,8 @@ type StrtableOffset = u64;
 const CODE_SECTION_INDEX: SectionIndex = 0;
 const DATA_SECTION_INDEX: SectionIndex = 1;
 const CSTRING_SECTION_INDEX: SectionIndex = 2;
-const NUM_DEFAULT_SECTIONS: SectionIndex = 3;
+const BSS_SECTION_INDEX: SectionIndex = 3;
+const NUM_DEFAULT_SECTIONS: SectionIndex = 4;
 
 /// A builder for creating a 32/64 bit Mach-o Nlist symbol
 #[derive(Debug)]
@@ -573,6 +574,11 @@ impl SegmentBuilder {
         let mut symbol_offset = 0;
         let mut sections = IndexMap::new();
         let mut align_pad_map = HashMap::new();
+        // TODO: see if this clone can be removed
+        let zero_init_data: Vec<_> = data.iter()
+            .filter(|decl| !decl.data.is_zero_init())
+            .cloned().collect();
+
         Self::build_section(
             symtab,
             "__text",
@@ -596,7 +602,7 @@ impl SegmentBuilder {
             &mut size,
             &mut symbol_offset,
             DATA_SECTION_INDEX,
-            &data,
+            data,
             3,
             None,
             &mut align_pad_map,
@@ -613,6 +619,20 @@ impl SegmentBuilder {
             &cstrings,
             0,
             Some(S_CSTRING_LITERALS),
+            &mut align_pad_map,
+        );
+        Self::build_section(
+            symtab,
+            "__DATA",
+            "__bss",
+            &mut sections,
+            &mut offset,
+            &mut size,
+            &mut symbol_offset,
+            BSS_SECTION_INDEX,
+            &zero_init_data,
+            0,
+            None,
             &mut align_pad_map,
         );
         for (idx, def) in custom_sections.iter().enumerate() {
@@ -793,7 +813,10 @@ impl<'a> Mach<'a> {
         // write code
         //////////////////////////////
         for code in self.code {
-            file.write_all(code.data)?;
+            match code.data {
+                Data::Blob(bytes) => file.write_all(bytes)?,
+                Data::ZeroInit(_) => unreachable!("cannot initialize code with zero-init data"),
+            };
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(code.name) {
                 for _ in 0..align_pad {
@@ -809,7 +832,9 @@ impl<'a> Mach<'a> {
         // write data
         //////////////////////////////
         for data in self.data {
-            file.write_all(data.data)?;
+            if let Data::Blob(bytes) = data.data {
+                file.write_all(bytes)?;
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(data.name) {
                 for _ in 0..align_pad {
@@ -826,7 +851,9 @@ impl<'a> Mach<'a> {
         // write cstrings
         //////////////////////////////
         for cstring in self.cstrings {
-            file.write_all(cstring.data)?;
+            if let Data::Blob(bytes) = cstring.data {
+                file.write_all(bytes)?;
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(cstring.name) {
                 for _ in 0..align_pad {
@@ -841,7 +868,9 @@ impl<'a> Mach<'a> {
         // write custom sections
         //////////////////////////////
         for section in self.sections {
-            file.write_all(section.data)?;
+            if let Data::Blob(bytes) = section.data {
+                file.write_all(bytes)?;
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(section.name) {
                 for _ in 0..align_pad {
