@@ -1,8 +1,6 @@
-# faerie [![Build Status](https://travis-ci.org/m4b/faerie.svg?branch=master)](https://travis-ci.org/m4b/faerie)
+# faerie [![Build Status](https://travis-ci.org/m4b/faerie.svg?branch=master)](https://travis-ci.org/m4b/faerie) [![Documentatation](https://docs.rs/faerie/badge.svg)](https://docs.rs/faerie).
 
-Emit some object files, at your leisure.
-
-For more information, [read the documentation](https://docs.rs/faerie).
+Emit some object files, at your leisure:
 
 ```rust
 let name = "test.o";
