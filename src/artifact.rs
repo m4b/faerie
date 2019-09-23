@@ -79,10 +79,10 @@ pub enum ArtifactError {
     /// A duplicate definition
     DuplicateDefinition(String),
     #[fail(
-        display = "ZeroInit data for a declaration that does not allow ZeroInit: {:?}",
+        display = "ZeroInit data is only allowed for DataDeclarations, got {:?}",
         _0
     )]
-    /// ZeroInit data for a declaration that does not allow ZeroInit
+    /// ZeroInit is only allowed for data
     InvalidZeroInit(DefinedDecl),
 
     /// A non section declaration got custom symbols during definition.
@@ -467,14 +467,17 @@ impl Artifact {
 
                 match decl {
                     DefinedDecl::Section(_) => {}
-                    DefinedDecl::Function(_) => {
-                        if let Data::ZeroInit(_) = data {
-                            return Err(ArtifactError::InvalidZeroInit(decl));
-                        }
-                    }
                     _ => {
                         if !symbols.is_empty() {
                             return Err(ArtifactError::NonSectionCustomSymbols(decl, symbols));
+                        }
+                    }
+                }
+                match decl{
+                    DefinedDecl::Data(_) => {},
+                    _ => {
+                        if let Data::ZeroInit(_) = data {
+                            return Err(ArtifactError::InvalidZeroInit(decl));
                         }
                     }
                 }

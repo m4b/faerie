@@ -813,10 +813,11 @@ impl<'a> Mach<'a> {
         // write code
         //////////////////////////////
         for code in self.code {
-            match code.data {
-                Data::Blob(bytes) => file.write_all(bytes)?,
-                Data::ZeroInit(_) => unreachable!("cannot initialize code with zero-init data"),
-            };
+            if let Data::Blob(bytes) = code.data {
+                file.write_all(&bytes)?;
+            } else {
+                unreachable!()
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(code.name) {
                 for _ in 0..align_pad {
@@ -853,6 +854,8 @@ impl<'a> Mach<'a> {
         for cstring in self.cstrings {
             if let Data::Blob(bytes) = cstring.data {
                 file.write_all(bytes)?;
+            } else {
+                unreachable!();
             }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(cstring.name) {
@@ -870,6 +873,8 @@ impl<'a> Mach<'a> {
         for section in self.sections {
             if let Data::Blob(bytes) = section.data {
                 file.write_all(bytes)?;
+            } else {
+                unreachable!()
             }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(section.name) {

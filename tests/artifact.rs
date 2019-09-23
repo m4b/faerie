@@ -209,3 +209,12 @@ fn bss() {
         _ => panic!("emitted as MACHO but did not parse as MACHO")
     }
 }
+
+#[test]
+fn invalid_bss() {
+    let mut artifact = Artifact::new(triple!("x86_64"), "bss".into());
+    artifact.declare("my_func", Decl::function()).unwrap();
+    assert!(artifact.define_zero_init("my_func", 100).is_err());
+    artifact.declare("my_section", Decl::section(SectionKind::Data)).unwrap();
+    assert!(artifact.define_zero_init("my_section", 100).is_err());
+}
