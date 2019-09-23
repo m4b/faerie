@@ -17,7 +17,8 @@ use string_interner::StringInterner;
 use target_lexicon::Architecture;
 
 use goblin::mach::constants::{
-    S_ATTR_DEBUG, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS, S_CSTRING_LITERALS, S_REGULAR,
+    S_ATTR_DEBUG, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS, S_CSTRING_LITERALS,
+    S_REGULAR, S_ZEROFILL,
 };
 use goblin::mach::cputype;
 use goblin::mach::header::{Header, MH_OBJECT, MH_SUBSECTIONS_VIA_SYMBOLS};
@@ -636,7 +637,7 @@ impl SegmentBuilder {
             BSS_SECTION_INDEX,
             &zero_init_data,
             0,
-            None,
+            Some(S_ZEROFILL),
             &mut align_pad_map,
         );
         for (idx, def) in custom_sections.iter().enumerate() {
