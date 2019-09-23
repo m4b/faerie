@@ -502,11 +502,13 @@ impl<'a> Elf<'a> {
 
         let section_name = match (def.data, decl) {
             (Data::Blob(_), DefinedDecl::Function(_)) => format!(".text.{}", name),
-            (Data::ZeroInit(_), DefinedDecl::Function(_)) => unreachable!("cannot define function as zero-init"),
+            (Data::ZeroInit(_), DefinedDecl::Function(_)) => {
+                unreachable!("cannot define function as zero-init")
+            }
             (Data::Blob(_), DefinedDecl::Data(decl)) => format!(
-                    ".{}.{}",
-                    if decl.is_writable() { "data" } else { "rodata" },
-                    name
+                ".{}.{}",
+                if decl.is_writable() { "data" } else { "rodata" },
+                name
             ),
             (Data::ZeroInit(_), DefinedDecl::Data(_)) => format!(".bss.{}", name),
             (_, DefinedDecl::Section(_)) => name.to_owned(),
@@ -520,7 +522,10 @@ impl<'a> Elf<'a> {
                 .exec(true)
                 .align(d.get_align()),
             DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
-                .section_type(Self::section_type_for_data(d.get_datatype(), def.data.is_zero_init()))
+                .section_type(Self::section_type_for_data(
+                    d.get_datatype(),
+                    def.data.is_zero_init(),
+                ))
                 .alloc()
                 .writable(d.is_writable())
                 .exec(false)

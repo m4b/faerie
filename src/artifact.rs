@@ -473,8 +473,8 @@ impl Artifact {
                         }
                     }
                 }
-                match decl{
-                    DefinedDecl::Data(_) => {},
+                match decl {
+                    DefinedDecl::Data(_) => {}
                     _ => {
                         if let Data::ZeroInit(_) = data {
                             return Err(ArtifactError::InvalidZeroInit(decl));
