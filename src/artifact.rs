@@ -307,7 +307,7 @@ impl Artifact {
             let previous = self
                 .declarations
                 .entry(decl_name)
-                .or_insert(InternalDecl::new(decl.clone()));
+                .or_insert(InternalDecl::new(decl));
             previous_was_import = previous.decl.is_import();
             previous.decl.absorb(decl)?;
             previous

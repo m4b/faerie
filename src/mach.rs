@@ -356,7 +356,8 @@ impl SymbolTable {
     pub fn offset(&self, symbol_name: &str) -> Option<u64> {
         self.strtable
             .get(symbol_name)
-            .and_then(|idx| self.symbols.get(&idx)).map(|sym| sym.get_segment_relative_offset())
+            .and_then(|idx| self.symbols.get(&idx))
+            .map(|sym| sym.get_segment_relative_offset())
     }
     /// Lookup this symbols ordinal index in the symbol table, if it has one
     pub fn index(&self, symbol_name: &str) -> Option<SymbolIndex> {
@@ -423,11 +424,11 @@ impl SegmentBuilder {
         self.size
     }
     /// The size of this segment's _load command_, including its associated sections, in bytes
-    pub fn load_command_size(&self, ctx: &Ctx) -> u64 {
+    pub fn load_command_size(&self, ctx: Ctx) -> u64 {
         Segment::size_with(&ctx) as u64
             + (self.sections.len() as u64 * Section::size_with(&ctx) as u64)
     }
-    fn _section_data_file_offset(&self, ctx: &Ctx) -> u64 {
+    fn _section_data_file_offset(&self, ctx: Ctx) -> u64 {
         // section data
         Header::size_with(&ctx.container) as u64 + self.load_command_size(ctx)
     }
@@ -565,7 +566,7 @@ impl SegmentBuilder {
         cstrings: &[Definition],
         custom_sections: &[Definition],
         symtab: &mut SymbolTable,
-        ctx: &Ctx,
+        ctx: Ctx,
     ) -> Self {
         let mut offset = Header::size_with(&ctx.container) as u64;
         let mut size = 0;
@@ -689,7 +690,7 @@ impl<'a> Mach<'a> {
             &cstrings,
             &sections,
             &mut symtab,
-            &ctx,
+            ctx,
         );
         build_relocations(&mut segment, &artifact, &symtab);
 
@@ -721,7 +722,7 @@ impl<'a> Mach<'a> {
         // FIXME: this is ugly af, need cmdsize to get symtable offset
         // construct symtab command
         let mut symtab_load_command = SymtabCommand::new();
-        let segment_load_command_size = self.segment.load_command_size(&self.ctx);
+        let segment_load_command_size = self.segment.load_command_size(self.ctx);
         let sizeof_load_commands = segment_load_command_size + symtab_load_command.cmdsize as u64;
         let symtable_offset = self.segment.offset + sizeof_load_commands;
         let strtable_offset =

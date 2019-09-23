@@ -255,7 +255,7 @@ impl SectionBuilder {
         self
     }
     /// Finalize and create the actual section
-    pub fn create(self, ctx: &Ctx) -> Section {
+    pub fn create(self, ctx: Ctx) -> Section {
         use goblin::elf::section_header::*;
         let mut shdr = Section::default();
         shdr.sh_flags = 0u64;
@@ -306,7 +306,7 @@ impl SectionBuilder {
             }
             SectionType::Relocation => {
                 // FIXME: hardcodes to use rela
-                shdr.sh_entsize = Relocation::size(true, *ctx) as u64;
+                shdr.sh_entsize = Relocation::size(true, ctx) as u64;
                 shdr.sh_addralign = 0x8;
                 shdr.sh_flags = 0;
                 shdr.sh_type = SHT_RELA
@@ -573,7 +573,7 @@ impl<'a> Elf<'a> {
             .section_index(shndx)
             .create();
 
-        let mut section = section.name_offset(offset).create(&self.ctx);
+        let mut section = section.name_offset(offset).create(self.ctx);
         // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
         self.sections.insert(
@@ -591,7 +591,7 @@ impl<'a> Elf<'a> {
         self.code.insert(idx, data);
         shndx
     }
-    pub fn import(&mut self, import: String, kind: &ImportKind) {
+    pub fn import(&mut self, import: String, kind: ImportKind) {
         let (idx, offset) = self.new_string(import);
         let symbol = SymbolBuilder::new(SymbolType::Import)
             .name_offset(offset)
@@ -725,7 +725,7 @@ impl<'a> Elf<'a> {
             let mut reloc_section = SectionBuilder::new(reloc_size)
                 .name_offset(reloc_section_offset)
                 .section_type(SectionType::Relocation)
-                .create(&self.ctx);
+                .create(self.ctx);
             // its sh_link always points to the symtable
             reloc_section.sh_link = SYMTAB_LINK as u32;
             // info tells us which section these relocations apply to
@@ -835,7 +835,7 @@ impl<'a> Elf<'a> {
             SectionBuilder::new(self.sizeof_strtab as u64)
                 .name_offset(offset)
                 .section_type(SectionType::StrTab)
-                .create(&self.ctx)
+                .create(self.ctx)
         };
         strtab.sh_offset = strtab_offset;
         section_headers.push(strtab);
@@ -845,7 +845,7 @@ impl<'a> Elf<'a> {
             SectionBuilder::new(sizeof_symtab as u64)
                 .name_offset(offset)
                 .section_type(SectionType::SymTab)
-                .create(&self.ctx)
+                .create(self.ctx)
         };
         symtab.sh_offset = symtab_offset;
         symtab.sh_link = 1; // we link to our strtab above
@@ -931,7 +931,7 @@ impl<'a> Elf<'a> {
             let mut section = SectionBuilder::new(sizeof_symtab_shndx)
                 .name_offset(symtab_shndx_name_offset)
                 .section_type(SectionType::SymTabShndx)
-                .create(&self.ctx);
+                .create(self.ctx);
             section.sh_link = 2;
             section.sh_offset = symtab_shndx_offset;
             section_headers.push(section);
@@ -974,7 +974,7 @@ impl<'a> Elf<'a> {
         let nonexec_stack = SectionBuilder::new(0)
             .name_offset(nonexec_stack_note_name_offset)
             .section_type(SectionType::Bits)
-            .create(&self.ctx);
+            .create(self.ctx);
         section_headers.push(nonexec_stack);
 
         /////////////////////////////////////
@@ -1009,9 +1009,9 @@ pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
         debug!("Def: {:?}", def);
         elf.add_definition(def);
     }
-    for (ref import, ref kind) in artifact.imports() {
+    for (import, kind) in artifact.imports() {
         debug!("Import: {:?} -> {:?}", import, kind);
-        elf.import(import.to_string(), kind);
+        elf.import(import.to_string(), *kind);
     }
     for link in artifact.links() {
         elf.link(&link);
