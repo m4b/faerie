@@ -109,10 +109,10 @@ struct InternalDecl {
 }
 
 impl Data {
-    /// Return the length of the data stored in this object.
+    /// Return the number of bytes of _disk_ this data will use.
     ///
-    /// For `ZeroInit` variant, returns the amount of space
-    /// that would be taken up when the program is loaded into memory.
+    /// This is different from the bytes of _memory_ for the `ZeroInit` variant,
+    /// since .bss sections are only allocated at load time.
     pub fn len(&self) -> usize {
         match self {
             Data::Blob(blob) => blob.len(),
