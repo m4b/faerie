@@ -205,7 +205,9 @@ fn bss() {
     file.write_all(&mach).unwrap();
     assert!(mach.len() < SIZE);
     match Object::parse(&mach).unwrap() {
-        Object::Mach(Mach::Binary(mach)) => assert!(!mach.symbols.unwrap().iter().next().is_some()),
+        Object::Mach(Mach::Binary(mach)) => {
+            assert!(mach.symbols.unwrap().iter().next().is_some());
+        }
         _ => panic!("emitted as MACHO but did not parse as MACHO"),
     }
 }
