@@ -578,7 +578,12 @@ impl SegmentBuilder {
         let mut sections = IndexMap::new();
         let mut align_pad_map = HashMap::new();
         // TODO: see if this clone can be removed
-        let zero_init_data: Vec<_> = data
+        let zeroed_data: Vec<_> = data
+            .iter()
+            .filter(|decl| decl.data.is_zero_init())
+            .cloned()
+            .collect();
+        let nonzeroed_data: Vec<_> = data
             .iter()
             .filter(|decl| !decl.data.is_zero_init())
             .cloned()
@@ -607,7 +612,7 @@ impl SegmentBuilder {
             &mut size,
             &mut symbol_offset,
             DATA_SECTION_INDEX,
-            data,
+            &nonzeroed_data,
             3,
             None,
             &mut align_pad_map,
@@ -628,14 +633,14 @@ impl SegmentBuilder {
         );
         Self::build_section(
             symtab,
-            "__DATA",
             "__bss",
+            "__DATA",
             &mut sections,
             &mut offset,
             &mut size,
             &mut symbol_offset,
             BSS_SECTION_INDEX,
-            &zero_init_data,
+            &zeroed_data,
             0,
             Some(S_ZEROFILL),
             &mut align_pad_map,
