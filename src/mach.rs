@@ -786,13 +786,13 @@ impl<'a> Mach<'a> {
         // FIXME: de-magic number these
         segment_load_command.initprot = 7;
         segment_load_command.maxprot = 7;
-        segment_load_command.vmsize = self.segment.size();
-        // segment size, with __bss data sizes removed
-        segment_load_command.filesize = {
-            let mut acc = segment_load_command.vmsize;
+        segment_load_command.filesize = self.segment.size();
+        // segment size, with __bss data sizes added
+        segment_load_command.vmsize = {
+            let mut acc = segment_load_command.filesize;
             for data in &self.data {
                 if let Data::ZeroInit(size) = data.data {
-                    acc -= *size as u64;
+                    acc += *size as u64;
                 }
             }
             acc

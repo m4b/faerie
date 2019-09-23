@@ -116,7 +116,7 @@ impl Data {
     pub fn len(&self) -> usize {
         match self {
             Data::Blob(blob) => blob.len(),
-            Data::ZeroInit(size) => *size,
+            Data::ZeroInit(_) => 0,
         }
     }
     /// Return whether the data has at least one byte defined
