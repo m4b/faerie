@@ -282,8 +282,7 @@ impl Decl {
                     _ => Err(ArtifactError::IncompatibleDeclaration {
                         old: *self,
                         new: other,
-                    }
-                    .into()),
+                    }),
                 }
             }
             Decl::Import(ImportKind::Function) => {
@@ -297,8 +296,7 @@ impl Decl {
                     _ => Err(ArtifactError::IncompatibleDeclaration {
                         old: *self,
                         new: other,
-                    }
-                    .into()),
+                    }),
                 }
             }
             // a previous data declaration can only be re-declared a data import, or it must match exactly the
@@ -312,8 +310,7 @@ impl Decl {
                         Err(ArtifactError::IncompatibleDeclaration {
                             old: *self,
                             new: other,
-                        }
-                        .into())
+                        })
                     }
                 }
             },
@@ -328,8 +325,7 @@ impl Decl {
                         Err(ArtifactError::IncompatibleDeclaration {
                             old: *self,
                             new: other,
-                        }
-                        .into())
+                        })
                     }
                 }
             },
@@ -340,8 +336,7 @@ impl Decl {
                     Err(ArtifactError::IncompatibleDeclaration {
                         old: *self,
                         new: other,
-                    }
-                    .into())
+                    })
                 }
             }
         }

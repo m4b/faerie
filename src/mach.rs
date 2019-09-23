@@ -356,8 +356,7 @@ impl SymbolTable {
     pub fn offset(&self, symbol_name: &str) -> Option<u64> {
         self.strtable
             .get(symbol_name)
-            .and_then(|idx| self.symbols.get(&idx))
-            .and_then(|sym| Some(sym.get_segment_relative_offset()))
+            .and_then(|idx| self.symbols.get(&idx)).map(|sym| sym.get_segment_relative_offset())
     }
     /// Lookup this symbols ordinal index in the symbol table, if it has one
     pub fn index(&self, symbol_name: &str) -> Option<SymbolIndex> {

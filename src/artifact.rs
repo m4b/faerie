@@ -99,7 +99,7 @@ impl InternalDecl {
     /// Wrap up a declaration. Initially marked as not defined.
     pub fn new(decl: Decl) -> Self {
         Self {
-            decl: decl,
+            decl,
             defined: false,
         }
     }
@@ -398,14 +398,14 @@ impl Artifact {
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
-                    Err(ArtifactError::DuplicateDefinition(
+                    return Err(ArtifactError::DuplicateDefinition(
                         name.as_ref().to_string(),
-                    ))?;
+                    ));
                 }
                 let decl = match stype.decl {
                     Decl::Defined(decl) => decl,
                     Decl::Import(_) => {
-                        Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
+                        return Err(ArtifactError::ImportDefined(name.as_ref().to_string()))
                     }
                 };
 
@@ -435,7 +435,7 @@ impl Artifact {
                 }
                 stype.define();
             }
-            None => Err(ArtifactError::Undeclared(name.as_ref().to_string()))?,
+            None => return Err(ArtifactError::Undeclared(name.as_ref().to_string())),
         }
         Ok(())
     }

@@ -260,7 +260,7 @@ fn decl_tests(tests: Vec<DeclTestCase>) {
 struct DeclTestCase {
     name: String,
     decl: Decl,
-    pred: Box<Fn(&Sym, &SectionHeader) -> Result<(), Error>>,
+    pred: Box<dyn Fn(&Sym, &SectionHeader) -> Result<(), Error>>,
 }
 impl DeclTestCase {
     fn new<D, F>(name: &str, decl: D, pred: F) -> Self
@@ -276,21 +276,21 @@ impl DeclTestCase {
     }
     fn define(&self, art: &mut Artifact) {
         art.declare(&self.name, self.decl)
-            .expect(&format!("declare {}", self.name));
+            .unwrap_or_else(|_| panic!("declare {}", self.name));
         art.define(&self.name, vec![1, 2, 3, 4])
-            .expect(&format!("define {}", self.name));
+            .unwrap_or_else(|_| panic!("define {}", self.name));
     }
     fn check(&self, elf: &goblin::elf::Elf) {
         let sym = elf
             .syms
             .iter()
-            .find(|sym| &elf.strtab[sym.st_name] == self.name)
+            .find(|sym| elf.strtab[sym.st_name] == self.name)
             .expect("symbol should exist");
         let sectheader = elf
             .section_headers
             .get(sym.st_shndx)
             .expect("section header should exist");
-        (self.pred)(&sym, sectheader).expect(&format!("check {}", self.name))
+        (self.pred)(&sym, sectheader).unwrap_or_else(|_| panic!("check {}", self.name))
     }
 }
 
@@ -315,7 +315,7 @@ fn extended_symtab_issue_76() {
             assert_eq!(elf.header.e_shnum, 0);
             assert_eq!(elf.section_headers.len(), 65541);
             assert_eq!(elf.shdr_relocs.len(), 0);
-            assert_eq!(elf.syms.len(), 131074);
+            assert_eq!(elf.syms.len(), 131_074);
         }
         _ => {
             panic!("Elf file not parsed as elf file");

@@ -756,7 +756,7 @@ impl<'a> Elf<'a> {
         let mut sizeof_symtab_shndx = 0;
         let mut symtab_shndx_name_offset = 0;
         let mut need_symtab_shndx = false;
-        if self.nsections >= SHN_LORESERVE.into() {
+        if self.nsections >= SHN_LORESERVE {
             self.nsections += 1;
             sizeof_symtab_shndx = symbol_count as u64 * 4;
             symtab_shndx_name_offset = self.new_string(".symtab_shndx".into()).1;
@@ -799,7 +799,7 @@ impl<'a> Elf<'a> {
         header.e_machine = machine.0;
         header.e_type = header::ET_REL;
         header.e_shoff = sh_offset;
-        header.e_shnum = if self.nsections >= SHN_LORESERVE.into() {
+        header.e_shnum = if self.nsections >= SHN_LORESERVE {
             0
         } else {
             self.nsections as u16
@@ -827,7 +827,7 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
 
         let mut section_headers = vec![SectionHeader::default()];
-        if self.nsections >= SHN_LORESERVE.into() {
+        if self.nsections >= SHN_LORESERVE {
             section_headers[0].sh_size = self.nsections as u64;
         }
         let mut strtab = {
