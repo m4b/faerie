@@ -781,8 +781,17 @@ impl<'a> Mach<'a> {
         // FIXME: de-magic number these
         segment_load_command.initprot = 7;
         segment_load_command.maxprot = 7;
-        segment_load_command.filesize = self.segment.size();
-        segment_load_command.vmsize = segment_load_command.filesize;
+        segment_load_command.vmsize = self.segment.size();
+        // segment size, with __bss data sizes removed
+        segment_load_command.filesize = {
+            let mut acc = segment_load_command.vmsize;
+            for data in &self.data {
+                if let Data::ZeroInit(size) = data.data {
+                    acc -= *size as u64;
+                }
+            }
+            acc
+        };
         segment_load_command.fileoff = first_section_offset;
         debug!("Segment: {:#?}", segment_load_command);
 
