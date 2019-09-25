@@ -566,7 +566,8 @@ impl SegmentBuilder {
     pub(crate) fn new(
         artifact: &Artifact,
         code: &[Definition],
-        data: &[Definition],
+        blob_data: &[Definition],
+        zeroed_data: &[Definition],
         cstrings: &[Definition],
         custom_sections: &[Definition],
         symtab: &mut SymbolTable,
@@ -577,17 +578,6 @@ impl SegmentBuilder {
         let mut symbol_offset = 0;
         let mut sections = IndexMap::new();
         let mut align_pad_map = HashMap::new();
-        // TODO: see if this clone can be removed
-        let zeroed_data: Vec<_> = data
-            .iter()
-            .filter(|decl| decl.data.is_zero_init())
-            .cloned()
-            .collect();
-        let nonzeroed_data: Vec<_> = data
-            .iter()
-            .filter(|decl| !decl.data.is_zero_init())
-            .cloned()
-            .collect();
 
         Self::build_section(
             symtab,
@@ -612,7 +602,7 @@ impl SegmentBuilder {
             &mut size,
             &mut symbol_offset,
             DATA_SECTION_INDEX,
-            &nonzeroed_data,
+            &blob_data,
             3,
             None,
             &mut align_pad_map,
@@ -683,6 +673,7 @@ struct Mach<'a> {
     segment: SegmentBuilder,
     code: ArtifactCode<'a>,
     data: ArtifactData<'a>,
+    bss_size: usize,
     cstrings: Vec<Definition<'a>>,
     sections: Vec<Definition<'a>>,
     _p: ::std::marker::PhantomData<&'a ()>,
@@ -692,8 +683,14 @@ impl<'a> Mach<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         // FIXME: I believe we can avoid this partition by refactoring SegmentBuilder::new
-        let (mut code, mut data, mut cstrings, mut sections) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut code, mut data, mut bss, mut cstrings, mut sections, mut bss_size) = (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
         for def in artifact.definitions() {
             match def.decl {
                 DefinedDecl::Function { .. } => {
@@ -702,6 +699,9 @@ impl<'a> Mach<'a> {
                 DefinedDecl::Data(d) => {
                     if d.get_datatype() == DataType::String {
                         cstrings.push(def);
+                    } else if let Data::ZeroInit(size) = def.data {
+                        bss.push(def);
+                        bss_size += size;
                     } else {
                         data.push(def);
                     }
@@ -717,6 +717,7 @@ impl<'a> Mach<'a> {
             &artifact,
             &code,
             &data,
+            &bss,
             &cstrings,
             &sections,
             &mut symtab,
@@ -732,6 +733,7 @@ impl<'a> Mach<'a> {
             _p: ::std::marker::PhantomData::default(),
             code,
             data,
+            bss_size,
             cstrings,
             sections,
         }
@@ -788,15 +790,7 @@ impl<'a> Mach<'a> {
         segment_load_command.maxprot = 7;
         segment_load_command.filesize = self.segment.size();
         // segment size, with __bss data sizes added
-        segment_load_command.vmsize = {
-            let mut acc = segment_load_command.filesize;
-            for data in &self.data {
-                if let Data::ZeroInit(size) = data.data {
-                    acc += *size as u64;
-                }
-            }
-            acc
-        };
+        segment_load_command.vmsize = segment_load_command.filesize + self.bss_size as u64;
         segment_load_command.fileoff = first_section_offset;
         debug!("Segment: {:#?}", segment_load_command);
 
