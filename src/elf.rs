@@ -498,7 +498,7 @@ impl<'a> Elf<'a> {
     pub fn add_definition(&mut self, def: artifact::Definition<'a>) {
         let name = def.name;
         let decl = def.decl;
-        let def_size = def.data.len();
+        let def_size = def.data.file_size();
 
         let section_name = match (def.data, decl) {
             (Data::Blob(_), DefinedDecl::Function(_)) => format!(".text.{}", name),

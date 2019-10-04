@@ -469,9 +469,9 @@ impl SegmentBuilder {
                     global: def.decl.is_global(),
                 },
             );
-            *symbol_offset += def.data.len() as u64;
-            section_relative_offset += def.data.len() as u64;
-            local_size += def.data.len() as u64;
+            *symbol_offset += def.data.file_size() as u64;
+            section_relative_offset += def.data.file_size() as u64;
+            local_size += def.data.file_size() as u64;
 
             let next_def_alignment_exponent = std::cmp::max(
                 min_alignment_exponent,
@@ -550,7 +550,7 @@ impl SegmentBuilder {
             );
         }
 
-        let local_size = def.data.len() as u64;
+        let local_size = def.data.file_size() as u64;
         *symbol_offset += local_size;
         let section = SectionBuilder::new(sectname, segment_name, local_size)
             .offset(*offset)

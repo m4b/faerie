@@ -113,7 +113,7 @@ impl Data {
     ///
     /// This is different from the bytes of _memory_ for the `ZeroInit` variant,
     /// since .bss sections are only allocated at load time.
-    pub fn len(&self) -> usize {
+    pub fn file_size(&self) -> usize {
         match self {
             Data::Blob(blob) => blob.len(),
             Data::ZeroInit(_) => 0,
