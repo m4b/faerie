@@ -697,11 +697,11 @@ impl<'a> Mach<'a> {
                     code.push(def);
                 }
                 DefinedDecl::Data(d) => {
-                    if d.get_datatype() == DataType::String {
-                        cstrings.push(def);
-                    } else if let Data::ZeroInit(size) = def.data {
+                    if let Data::ZeroInit(size) = def.data {
                         bss.push(def);
                         bss_size += size;
+                    } else if d.get_datatype() == DataType::String {
+                        cstrings.push(def);
                     } else {
                         data.push(def);
                     }
