@@ -544,7 +544,7 @@ impl<'a> Elf<'a> {
 
         let shndx = match def.data {
             Data::Blob(bytes) => self.add_progbits(section_name, section, bytes),
-            Data::ZeroInit(_) => self.add_bss(section_name, section),
+            Data::ZeroInit(_) => self.add_section(section_name, section).1,
         };
 
         match decl {
@@ -579,40 +579,23 @@ impl<'a> Elf<'a> {
     }
     /// Create a progbits section (and its section symbol), and return the section index.
     fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
-        let (idx, offset) = self.new_string(name);
-        debug!(
-            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
-            idx, offset, self.sizeof_strtab
-        );
+        let (idx, shndx) = self.add_section(name, section);
         // store the size of this code
         let size = data.len();
-        // the symbols section reference/index will be the current number of sections
-        let shndx = self.sections.len() + 3; // null + strtab + symtab
-        let section_symbol = SymbolBuilder::new(SymbolType::Section)
-            .section_index(shndx)
-            .create();
-
-        let mut section = section.name_offset(offset).create(&self.ctx);
-        // the offset is the head of how many program bits we've added
-        section.sh_offset = self.sizeof_bits as u64;
-        self.sections.insert(
-            idx,
-            SectionInfo {
-                header: section,
-                symbol: section_symbol,
-                name: idx,
-            },
-        );
-        self.nsections += 1;
         // increment the size
         self.sizeof_bits += size;
 
         self.code.insert(idx, data);
         shndx
     }
-    /// Create a .bss section (and its section symbol) and return the section index
-    fn add_bss(&mut self, name: String, section: SectionBuilder) -> usize {
+    /// Create a section (and its section symbol) and return the symbol and section indexes
+    fn add_section(&mut self, name: String, section: SectionBuilder) -> (usize, usize) {
         let (idx, offset) = self.new_string(name);
+        debug!(
+            "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+            idx, offset, self.sizeof_strtab
+        );
+
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab
         let section_symbol = SymbolBuilder::new(SymbolType::Section)
@@ -630,7 +613,7 @@ impl<'a> Elf<'a> {
             },
         );
         self.nsections += 1;
-        shndx
+        (idx, shndx)
     }
     pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
