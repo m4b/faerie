@@ -108,6 +108,12 @@ struct InternalDecl {
     defined: bool,
 }
 
+impl Into<Data> for Vec<u8> {
+    fn into(self) -> Data {
+        Data::Blob(self)
+    }
+}
+
 impl Data {
     /// Return the number of bytes of _disk_ this data will use.
     ///
@@ -444,13 +450,14 @@ impl Artifact {
     ///
     /// let _blob = artifact.emit().unwrap();
     /// ```
-    pub fn define_with_symbols<T: AsRef<str>>(
+    pub fn define_with_symbols<T: AsRef<str>, D: Into<Data>>(
         &mut self,
         name: T,
-        data: Data,
+        data: D,
         symbols: BTreeMap<String, u64>,
     ) -> Result<(), ArtifactError> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
+        let data = data.into();
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
