@@ -580,10 +580,8 @@ impl<'a> Elf<'a> {
     /// Create a progbits section (and its section symbol), and return the section index.
     fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
         let (idx, shndx) = self.add_section(name, section);
-        // store the size of this code
-        let size = data.len();
         // increment the size
-        self.sizeof_bits += size;
+        self.sizeof_bits += data.len();
 
         self.code.insert(idx, data);
         shndx
@@ -603,6 +601,7 @@ impl<'a> Elf<'a> {
             .create();
 
         let mut section = section.name_offset(offset).create(&self.ctx);
+        // the offset is the head of how many program bits we've added
         section.sh_offset = self.sizeof_bits as u64;
         self.sections.insert(
             idx,
