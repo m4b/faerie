@@ -16,8 +16,15 @@ pub use crate::artifact::decl::{
     DataType, Decl, DefinedDecl, ImportKind, Scope, SectionKind, Visibility,
 };
 
-/// A blob of binary bytes, representing a function body, or data object
-pub type Data = Vec<u8>;
+// we need Ord so that `InternalDefinition` can go in a BTreeSet
+/// The data to be stored in an artifact, representing a function body or data object.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub enum Data {
+    /// A blob of binary bytes, representing a function body, or data object
+    Blob(Vec<u8>),
+    /// Zero-initialized data with a given size. This is implemented as a .bss section.
+    ZeroInit(usize),
+}
 
 /// The kind of relocation for a link.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
@@ -71,6 +78,12 @@ pub enum ArtifactError {
     #[fail(display = "Duplicate definition of symbol: {}", _0)]
     /// A duplicate definition
     DuplicateDefinition(String),
+    #[fail(
+        display = "ZeroInit data is only allowed for DataDeclarations, got {:?}",
+        _0
+    )]
+    /// ZeroInit is only allowed for data
+    InvalidZeroInit(DefinedDecl),
 
     /// A non section declaration got custom symbols during definition.
     #[fail(
@@ -95,11 +108,44 @@ struct InternalDecl {
     defined: bool,
 }
 
+impl Into<Data> for Vec<u8> {
+    fn into(self) -> Data {
+        Data::Blob(self)
+    }
+}
+
+impl Data {
+    /// Return the number of bytes of _disk_ this data will use.
+    ///
+    /// This is different from the bytes of _memory_ for the `ZeroInit` variant,
+    /// since .bss sections are only allocated at load time.
+    pub fn file_size(&self) -> usize {
+        match self {
+            Data::Blob(blob) => blob.len(),
+            Data::ZeroInit(_) => 0,
+        }
+    }
+    /// Return whether the data has at least one byte defined
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Data::Blob(blob) => blob.is_empty(),
+            Data::ZeroInit(size) => *size == 0,
+        }
+    }
+    /// Return whether this data is a ZeroInit variant
+    pub fn is_zero_init(&self) -> bool {
+        match self {
+            Data::ZeroInit(_) => true,
+            Data::Blob(_) => false,
+        }
+    }
+}
+
 impl InternalDecl {
     /// Wrap up a declaration. Initially marked as not defined.
     pub fn new(decl: Decl) -> Self {
         Self {
-            decl: decl,
+            decl,
             defined: false,
         }
     }
@@ -132,12 +178,12 @@ pub struct LinkAndDecl<'a> {
 }
 
 /// A definition of a symbol with its properties the various backends receive
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Definition<'a> {
     /// Name of symbol
     pub name: &'a str,
     /// Contents of definition
-    pub data: &'a [u8],
+    pub data: &'a Data,
     /// Custom symbols referencing this section, or none for other definition types.
     pub symbols: &'a BTreeMap<String, u64>,
     /// Declaration of symbol
@@ -356,11 +402,27 @@ impl Artifact {
         }
         Ok(())
     }
-    /// Defines a _previously declared_ program object.
+    /// Defines a _previously declared_ program object with the given data.
     /// **NB**: If you attempt to define an import, this will return an error.
     /// If you attempt to define something which has not been declared, this will return an error.
+    ///
+    /// See the documentation for [`Data`](type.Data.html) for the difference
+    /// from `define_zero_init`.
+    #[inline]
     pub fn define<T: AsRef<str>>(&mut self, name: T, data: Vec<u8>) -> Result<(), ArtifactError> {
-        self.define_with_symbols(name, data, BTreeMap::new())
+        self.define_with_symbols(name, Data::Blob(data), BTreeMap::new())
+    }
+
+    /// Defines a _previously declared_ program object with all zeros.
+    /// **NB**: If you attempt to define an import, this will return an error.
+    /// If you attempt to define something which has not been declared, this will return an error.
+    #[inline]
+    pub fn define_zero_init<T: AsRef<str>>(
+        &mut self,
+        name: T,
+        size: usize,
+    ) -> Result<(), ArtifactError> {
+        self.define_with_symbols(name, Data::ZeroInit(size), BTreeMap::new())
     }
 
     /// Same as `define` but also allows to add custom symbols referencing a section decl.
@@ -376,7 +438,7 @@ impl Artifact {
     /// # use std::collections::BTreeMap;
     /// # use std::str::FromStr;
     /// #
-    /// # use faerie::{Artifact, ArtifactBuilder, Decl, Link, SectionKind};
+    /// # use faerie::{Artifact, ArtifactBuilder, Data, Decl, Link, SectionKind};
     /// #
     /// let mut artifact = Artifact::new(target_lexicon::triple!("x86_64-apple-darwin"), "example".to_string());
     ///
@@ -384,17 +446,18 @@ impl Artifact {
     ///
     /// let mut section_symbols = BTreeMap::new();
     /// section_symbols.insert("a_symbol".to_string(), 2);
-    /// artifact.define_with_symbols(".my_section", vec![0xde, 0xad, 0xbe, 0xef], section_symbols).unwrap();
+    /// artifact.define_with_symbols(".my_section", Data::Blob(vec![0xde, 0xad, 0xbe, 0xef]), section_symbols).unwrap();
     ///
     /// let _blob = artifact.emit().unwrap();
     /// ```
-    pub fn define_with_symbols<T: AsRef<str>>(
+    pub fn define_with_symbols<T: AsRef<str>, D: Into<Data>>(
         &mut self,
         name: T,
-        data: Vec<u8>,
+        data: D,
         symbols: BTreeMap<String, u64>,
     ) -> Result<(), ArtifactError> {
         let decl_name = self.strings.get_or_intern(name.as_ref());
+        let data = data.into();
         match self.declarations.get_mut(&decl_name) {
             Some(ref mut stype) => {
                 if stype.defined {
@@ -414,6 +477,14 @@ impl Artifact {
                     _ => {
                         if !symbols.is_empty() {
                             return Err(ArtifactError::NonSectionCustomSymbols(decl, symbols));
+                        }
+                    }
+                }
+                match decl {
+                    DefinedDecl::Data(_) => {}
+                    _ => {
+                        if let Data::ZeroInit(_) = data {
+                            return Err(ArtifactError::InvalidZeroInit(decl));
                         }
                     }
                 }

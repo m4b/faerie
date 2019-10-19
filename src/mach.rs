@@ -1,6 +1,8 @@
 //! The Mach 32/64 bit backend for transforming an artifact to a valid, mach-o object file.
 
-use crate::artifact::{DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc, SectionKind};
+use crate::artifact::{
+    Data, DataType, Decl, DefinedDecl, Definition, ImportKind, Reloc, SectionKind,
+};
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
@@ -15,7 +17,8 @@ use string_interner::StringInterner;
 use target_lexicon::Architecture;
 
 use goblin::mach::constants::{
-    S_ATTR_DEBUG, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS, S_CSTRING_LITERALS, S_REGULAR,
+    S_ATTR_DEBUG, S_ATTR_PURE_INSTRUCTIONS, S_ATTR_SOME_INSTRUCTIONS, S_CSTRING_LITERALS,
+    S_REGULAR, S_ZEROFILL,
 };
 use goblin::mach::cputype;
 use goblin::mach::header::{Header, MH_OBJECT, MH_SUBSECTIONS_VIA_SYMBOLS};
@@ -60,7 +63,8 @@ type StrtableOffset = u64;
 const CODE_SECTION_INDEX: SectionIndex = 0;
 const DATA_SECTION_INDEX: SectionIndex = 1;
 const CSTRING_SECTION_INDEX: SectionIndex = 2;
-const NUM_DEFAULT_SECTIONS: SectionIndex = 3;
+const BSS_SECTION_INDEX: SectionIndex = 3;
+const NUM_DEFAULT_SECTIONS: SectionIndex = 4;
 
 /// A builder for creating a 32/64 bit Mach-o Nlist symbol
 #[derive(Debug)]
@@ -465,9 +469,9 @@ impl SegmentBuilder {
                     global: def.decl.is_global(),
                 },
             );
-            *symbol_offset += def.data.len() as u64;
-            section_relative_offset += def.data.len() as u64;
-            local_size += def.data.len() as u64;
+            *symbol_offset += def.data.file_size() as u64;
+            section_relative_offset += def.data.file_size() as u64;
+            local_size += def.data.file_size() as u64;
 
             let next_def_alignment_exponent = std::cmp::max(
                 min_alignment_exponent,
@@ -546,7 +550,7 @@ impl SegmentBuilder {
             );
         }
 
-        let local_size = def.data.len() as u64;
+        let local_size = def.data.file_size() as u64;
         *symbol_offset += local_size;
         let section = SectionBuilder::new(sectname, segment_name, local_size)
             .offset(*offset)
@@ -562,7 +566,8 @@ impl SegmentBuilder {
     pub(crate) fn new(
         artifact: &Artifact,
         code: &[Definition],
-        data: &[Definition],
+        blob_data: &[Definition],
+        zeroed_data: &[Definition],
         cstrings: &[Definition],
         custom_sections: &[Definition],
         symtab: &mut SymbolTable,
@@ -573,6 +578,7 @@ impl SegmentBuilder {
         let mut symbol_offset = 0;
         let mut sections = IndexMap::new();
         let mut align_pad_map = HashMap::new();
+
         Self::build_section(
             symtab,
             "__text",
@@ -596,7 +602,7 @@ impl SegmentBuilder {
             &mut size,
             &mut symbol_offset,
             DATA_SECTION_INDEX,
-            &data,
+            &blob_data,
             3,
             None,
             &mut align_pad_map,
@@ -613,6 +619,20 @@ impl SegmentBuilder {
             &cstrings,
             0,
             Some(S_CSTRING_LITERALS),
+            &mut align_pad_map,
+        );
+        Self::build_section(
+            symtab,
+            "__bss",
+            "__DATA",
+            &mut sections,
+            &mut offset,
+            &mut size,
+            &mut symbol_offset,
+            BSS_SECTION_INDEX,
+            &zeroed_data,
+            0,
+            Some(S_ZEROFILL),
             &mut align_pad_map,
         );
         for (idx, def) in custom_sections.iter().enumerate() {
@@ -653,6 +673,7 @@ struct Mach<'a> {
     segment: SegmentBuilder,
     code: ArtifactCode<'a>,
     data: ArtifactData<'a>,
+    bss_size: usize,
     cstrings: Vec<Definition<'a>>,
     sections: Vec<Definition<'a>>,
     _p: ::std::marker::PhantomData<&'a ()>,
@@ -662,15 +683,24 @@ impl<'a> Mach<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         // FIXME: I believe we can avoid this partition by refactoring SegmentBuilder::new
-        let (mut code, mut data, mut cstrings, mut sections) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut code, mut data, mut bss, mut cstrings, mut sections, mut bss_size) = (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
         for def in artifact.definitions() {
             match def.decl {
                 DefinedDecl::Function { .. } => {
                     code.push(def);
                 }
                 DefinedDecl::Data(d) => {
-                    if d.get_datatype() == DataType::String {
+                    if let Data::ZeroInit(size) = def.data {
+                        bss.push(def);
+                        bss_size += size;
+                    } else if d.get_datatype() == DataType::String {
                         cstrings.push(def);
                     } else {
                         data.push(def);
@@ -687,6 +717,7 @@ impl<'a> Mach<'a> {
             &artifact,
             &code,
             &data,
+            &bss,
             &cstrings,
             &sections,
             &mut symtab,
@@ -702,6 +733,7 @@ impl<'a> Mach<'a> {
             _p: ::std::marker::PhantomData::default(),
             code,
             data,
+            bss_size,
             cstrings,
             sections,
         }
@@ -757,7 +789,8 @@ impl<'a> Mach<'a> {
         segment_load_command.initprot = 7;
         segment_load_command.maxprot = 7;
         segment_load_command.filesize = self.segment.size();
-        segment_load_command.vmsize = segment_load_command.filesize;
+        // segment size, with __bss data sizes added
+        segment_load_command.vmsize = segment_load_command.filesize + self.bss_size as u64;
         segment_load_command.fileoff = first_section_offset;
         debug!("Segment: {:#?}", segment_load_command);
 
@@ -793,7 +826,11 @@ impl<'a> Mach<'a> {
         // write code
         //////////////////////////////
         for code in self.code {
-            file.write_all(code.data)?;
+            if let Data::Blob(bytes) = code.data {
+                file.write_all(&bytes)?;
+            } else {
+                unreachable!()
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(code.name) {
                 for _ in 0..align_pad {
@@ -809,7 +846,9 @@ impl<'a> Mach<'a> {
         // write data
         //////////////////////////////
         for data in self.data {
-            file.write_all(data.data)?;
+            if let Data::Blob(bytes) = data.data {
+                file.write_all(bytes)?;
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(data.name) {
                 for _ in 0..align_pad {
@@ -826,7 +865,11 @@ impl<'a> Mach<'a> {
         // write cstrings
         //////////////////////////////
         for cstring in self.cstrings {
-            file.write_all(cstring.data)?;
+            if let Data::Blob(bytes) = cstring.data {
+                file.write_all(bytes)?;
+            } else {
+                unreachable!();
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(cstring.name) {
                 for _ in 0..align_pad {
@@ -841,7 +884,11 @@ impl<'a> Mach<'a> {
         // write custom sections
         //////////////////////////////
         for section in self.sections {
-            file.write_all(section.data)?;
+            if let Data::Blob(bytes) = section.data {
+                file.write_all(bytes)?;
+            } else {
+                unreachable!()
+            }
 
             if let Some(&align_pad) = self.segment.align_pad_map.get(section.name) {
                 for _ in 0..align_pad {

@@ -180,3 +180,48 @@ fn vary_output_formats() {
     }
     */
 }
+
+#[test]
+fn bss() {
+    use goblin::{mach::Mach, Object};
+    use std::io::Write;
+    use target_lexicon::BinaryFormat;
+
+    const SIZE: usize = 100_000_000_000_000;
+
+    let mut artifact = Artifact::new(triple!("x86_64"), "bss".into());
+    artifact.declare("my_data", Decl::data().global()).unwrap();
+    artifact.define_zero_init("my_data", SIZE).unwrap();
+
+    let elf = artifact.emit_as(BinaryFormat::Elf).unwrap();
+    assert!(elf.len() < SIZE);
+    match Object::parse(&elf).unwrap() {
+        Object::Elf(elf) => assert!(!elf.syms.is_empty()),
+        _ => panic!("emitted as ELF but did not parse as ELF"),
+    }
+
+    let mach = artifact.emit_as(BinaryFormat::Macho).unwrap();
+    let mut file = std::fs::File::create("mach.o").unwrap();
+    file.write_all(&mach).unwrap();
+    assert!(mach.len() < SIZE);
+    match Object::parse(&mach).unwrap() {
+        Object::Mach(Mach::Binary(mach)) => {
+            assert!(mach
+                .segments
+                .iter()
+                .any(|segment| segment.vmsize == SIZE as u64));
+        }
+        _ => panic!("emitted as MACHO but did not parse as MACHO"),
+    }
+}
+
+#[test]
+fn invalid_bss() {
+    let mut artifact = Artifact::new(triple!("x86_64"), "bss".into());
+    artifact.declare("my_func", Decl::function()).unwrap();
+    assert!(artifact.define_zero_init("my_func", 100).is_err());
+    artifact
+        .declare("my_section", Decl::section(SectionKind::Data))
+        .unwrap();
+    assert!(artifact.define_zero_init("my_section", 100).is_err());
+}

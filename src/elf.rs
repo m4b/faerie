@@ -7,7 +7,7 @@
 
 use crate::{
     artifact::{
-        self, Artifact, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
+        self, Artifact, Data, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
         Visibility,
     },
     target::make_ctx,
@@ -189,6 +189,7 @@ impl<'a> SymbolBuilder<'a> {
 
 /// The kind of section this can be; used in [SectionBuilder](struct.SectionBuilder.html)
 enum SectionType {
+    NoBits, // bss
     Bits,
     Data,
     String,
@@ -316,6 +317,12 @@ impl SectionBuilder {
                 shdr.sh_addralign = 4;
                 shdr.sh_type = SHT_SYMTAB_SHNDX;
             }
+            SectionType::NoBits => {
+                shdr.sh_type = SHT_NOBITS;
+                // .bss is always SHF_WRITE and SHF_ALLOC
+                // TODO: warn users if self.alloc is not set
+                shdr.sh_flags |= u64::from(SHF_WRITE | SHF_ALLOC);
+            }
             SectionType::None => shdr.sh_type = SHT_NULL,
         }
         shdr
@@ -379,7 +386,6 @@ impl RelocationBuilder {
     }
 }
 
-//#[derive(Debug)]
 /// An intermediate ELF object file container
 struct Elf<'a> {
     name: &'a str,
@@ -480,19 +486,32 @@ impl<'a> Elf<'a> {
             }
         }
     }
+    fn section_type_for_data(typ: DataType, is_zero_init: bool) -> SectionType {
+        if is_zero_init {
+            return SectionType::NoBits;
+        }
+        match typ {
+            DataType::Bytes => SectionType::Data,
+            DataType::String => SectionType::String,
+        }
+    }
     pub fn add_definition(&mut self, def: artifact::Definition<'a>) {
         let name = def.name;
         let decl = def.decl;
-        let def_size = def.data.len();
+        let def_size = def.data.file_size();
 
-        let section_name = match decl {
-            DefinedDecl::Function(_) => format!(".text.{}", name),
-            DefinedDecl::Data(d) => format!(
+        let section_name = match (def.data, decl) {
+            (Data::Blob(_), DefinedDecl::Function(_)) => format!(".text.{}", name),
+            (Data::ZeroInit(_), DefinedDecl::Function(_)) => {
+                unreachable!("cannot define function as zero-init")
+            }
+            (Data::Blob(_), DefinedDecl::Data(decl)) => format!(
                 ".{}.{}",
-                if d.is_writable() { "data" } else { "rodata" },
+                if decl.is_writable() { "data" } else { "rodata" },
                 name
             ),
-            DefinedDecl::Section(_) => name.to_owned(),
+            (Data::ZeroInit(_), DefinedDecl::Data(_)) => format!(".bss.{}", name),
+            (_, DefinedDecl::Section(_)) => name.to_owned(),
         };
 
         let section = match decl {
@@ -503,10 +522,10 @@ impl<'a> Elf<'a> {
                 .exec(true)
                 .align(d.get_align()),
             DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
-                .section_type(match d.get_datatype() {
-                    DataType::Bytes => SectionType::Data,
-                    DataType::String => SectionType::String,
-                })
+                .section_type(Self::section_type_for_data(
+                    d.get_datatype(),
+                    def.data.is_zero_init(),
+                ))
                 .alloc()
                 .writable(d.is_writable())
                 .exec(false)
@@ -517,16 +536,16 @@ impl<'a> Elf<'a> {
                     if name == ".debug_str" || name == ".debug_line_str" {
                         SectionType::String
                     } else {
-                        match d.get_datatype() {
-                            DataType::Bytes => SectionType::Bits,
-                            DataType::String => SectionType::String,
-                        }
+                        Self::section_type_for_data(d.get_datatype(), def.data.is_zero_init())
                     },
                 )
                 .align(d.get_align()),
         };
 
-        let shndx = self.add_progbits(section_name, section, def.data);
+        let shndx = match def.data {
+            Data::Blob(bytes) => self.add_progbits(section_name, section, bytes),
+            Data::ZeroInit(_) => self.add_section(section_name, section).1,
+        };
 
         match decl {
             DefinedDecl::Function(_) | DefinedDecl::Data(_) => {
@@ -560,13 +579,21 @@ impl<'a> Elf<'a> {
     }
     /// Create a progbits section (and its section symbol), and return the section index.
     fn add_progbits(&mut self, name: String, section: SectionBuilder, data: &'a [u8]) -> usize {
+        let (idx, shndx) = self.add_section(name, section);
+        // increment the size
+        self.sizeof_bits += data.len();
+
+        self.code.insert(idx, data);
+        shndx
+    }
+    /// Create a section (and its section symbol) and return the symbol and section indexes
+    fn add_section(&mut self, name: String, section: SectionBuilder) -> (usize, usize) {
         let (idx, offset) = self.new_string(name);
         debug!(
             "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
             idx, offset, self.sizeof_strtab
         );
-        // store the size of this code
-        let size = data.len();
+
         // the symbols section reference/index will be the current number of sections
         let shndx = self.sections.len() + 3; // null + strtab + symtab
         let section_symbol = SymbolBuilder::new(SymbolType::Section)
@@ -585,11 +612,7 @@ impl<'a> Elf<'a> {
             },
         );
         self.nsections += 1;
-        // increment the size
-        self.sizeof_bits += size;
-
-        self.code.insert(idx, data);
-        shndx
+        (idx, shndx)
     }
     pub fn import(&mut self, import: String, kind: &ImportKind) {
         let (idx, offset) = self.new_string(import);
