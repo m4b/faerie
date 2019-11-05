@@ -260,7 +260,7 @@ fn decl_tests(tests: Vec<DeclTestCase>) {
 struct DeclTestCase {
     name: String,
     decl: Decl,
-    pred: Box<Fn(&Sym, &SectionHeader) -> Result<(), Error>>,
+    pred: Box<dyn Fn(&Sym, &SectionHeader) -> Result<(), Error>>,
 }
 impl DeclTestCase {
     fn new<D, F>(name: &str, decl: D, pred: F) -> Self
