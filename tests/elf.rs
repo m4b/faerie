@@ -3,11 +3,9 @@ extern crate goblin;
 extern crate scroll;
 #[macro_use]
 extern crate target_lexicon;
-#[macro_use]
-extern crate failure;
 
+use anyhow::{ensure, Error};
 use faerie::{Artifact, ArtifactBuilder, Decl, Link};
-use failure::Error;
 use goblin::elf::*;
 use std::str::FromStr;
 

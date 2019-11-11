@@ -6,7 +6,7 @@ use crate::artifact::{
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
-use failure::Error;
+use anyhow::Error;
 use indexmap::IndexMap;
 use scroll::ctx::SizeWith;
 use scroll::{IOwrite, Pwrite};
