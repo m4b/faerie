@@ -13,7 +13,7 @@ use crate::{
     target::make_ctx,
     Ctx,
 };
-use failure::Error;
+use anyhow::Error;
 use goblin;
 
 use indexmap::IndexMap;

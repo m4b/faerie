@@ -1,11 +1,9 @@
 extern crate env_logger;
 extern crate faerie;
-extern crate failure;
 extern crate goblin;
 extern crate structopt;
 extern crate target_lexicon;
 
-use failure::Error;
 use structopt::StructOpt;
 use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor};
 
@@ -60,7 +58,7 @@ pub struct Args {
 }
 
 #[rustfmt::skip]
-fn run (args: Args) -> Result<(), Error> {
+fn run (args: Args) -> anyhow::Result<()> {
     let file = File::create(Path::new(&args.filename))?;
     let target = Triple {
         architecture: Architecture::X86_64,
@@ -186,7 +184,7 @@ fn run (args: Args) -> Result<(), Error> {
 }
 
 #[rustfmt::skip]
-fn deadbeef (args: Args) -> Result<(), Error> {
+fn deadbeef (args: Args) -> anyhow::Result<()> {
     let file = File::create(Path::new(&args.filename))?;
     let target = Triple {
         architecture: Architecture::X86_64,
@@ -362,7 +360,7 @@ fn deadbeef (args: Args) -> Result<(), Error> {
     Ok(())
 }
 
-fn link(name: &str, output: &str, linkline: &[String]) -> Result<(), Error> {
+fn link(name: &str, output: &str, linkline: &[String]) -> anyhow::Result<()> {
     //ld -e _start -I/usr/lib/ld-linux-x86-64.so.2 -L/usr/lib/ /usr/lib/crti.o /usr/lib/Scrt1.o /usr/lib/crtn.o test.o -lc -o test
     let child = Command::new("cc")
         .args(linkline)

@@ -1,9 +1,10 @@
 //! An artifact is a platform independent binary object file format abstraction.
 
-use failure::Error;
+use anyhow::{bail, Error};
 use indexmap::IndexMap;
 use string_interner::StringInterner;
 use target_lexicon::{BinaryFormat, Triple};
+use thiserror::Error;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -52,22 +53,19 @@ type StringID = usize;
 type Relocation = (StringID, StringID, u64, Reloc);
 
 /// The kinds of errors that can befall someone creating an Artifact
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum ArtifactError {
-    #[fail(display = "Undeclared symbolic reference to: {}", _0)]
+    #[error("Undeclared symbolic reference to: {0}")]
     /// Undeclarated symbolic reference
     Undeclared(String),
-    #[fail(display = "Attempt to define an undefined import: {}", _0)]
+    #[error("Attempt to define an undefined import: {0}")]
     /// Attempt to define an undefined import
     ImportDefined(String),
-    #[fail(display = "Attempt to add a relocation to an import: {}", _0)]
+    #[error("Attempt to add a relocation to an import: {0}")]
     /// Attempt to use a relocation inside an import
     RelocateImport(String),
     // FIXME: don't use debugging prints for decl formats
-    #[fail(
-        display = "Incompatible declarations, old declaration {:?} is incompatible with new {:?}",
-        old, new
-    )]
+    #[error("Incompatible declarations, old declaration {old:?} is incompatible with new {new:?}")]
     /// An incompatble declaration occurred, please see the [absorb](enum.Decl.html#method.absorb) method on `Decl`
     IncompatibleDeclaration {
         /// Previously provided declaration
@@ -75,21 +73,15 @@ pub enum ArtifactError {
         /// Declaration that caused this error
         new: Decl,
     },
-    #[fail(display = "Duplicate definition of symbol: {}", _0)]
+    #[error("Duplicate definition of symbol: {0}")]
     /// A duplicate definition
     DuplicateDefinition(String),
-    #[fail(
-        display = "ZeroInit data is only allowed for DataDeclarations, got {:?}",
-        _0
-    )]
+    #[error("ZeroInit data is only allowed for DataDeclarations, got {0:?}")]
     /// ZeroInit is only allowed for data
     InvalidZeroInit(DefinedDecl),
 
     /// A non section declaration got custom symbols during definition.
-    #[fail(
-        display = "Attempt to add custom symbols {:?} to non section declaration {:?}",
-        _1, _0
-    )]
+    #[error("Attempt to add custom symbols {1:?} to non section declaration {0:?}")]
     NonSectionCustomSymbols(DefinedDecl, BTreeMap<String, u64>),
 }
 
@@ -535,16 +527,16 @@ impl Artifact {
         ) {
             (Some(ref from_type), Some(_)) => {
                 if from_type.decl.is_import() {
-                    return Err(ArtifactError::RelocateImport(link.from.to_string()).into());
+                    bail!(ArtifactError::RelocateImport(link.from.to_string()));
                 }
                 let link = (link_from, link_to, link.at, reloc);
                 self.links.push(link);
             }
             (None, _) => {
-                return Err(ArtifactError::Undeclared(link.from.to_string()).into());
+                bail!(ArtifactError::Undeclared(link.from.to_string()));
             }
             (_, None) => {
-                return Err(ArtifactError::Undeclared(link.to.to_string()).into());
+                bail!(ArtifactError::Undeclared(link.to.to_string()));
             }
         }
         Ok(())
@@ -579,16 +571,16 @@ impl Artifact {
             match format {
                 BinaryFormat::Elf => elf::to_bytes(self),
                 BinaryFormat::Macho => mach::to_bytes(self),
-                _ => Err(format_err!(
+                _ => bail!(
                     "binary format {} is not supported",
                     self.target.binary_format
-                )),
+                ),
             }
         } else {
-            Err(format_err!(
+            bail!(
                 "the following symbols are declared but not defined: {:?}",
                 undef
-            ))
+            )
         }
     }
 
