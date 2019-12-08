@@ -89,6 +89,7 @@ struct SymbolBuilder<'a> {
     size: u64,
     typ: SymbolType<'a>,
     shndx: usize,
+    value: u64
 }
 
 impl<'a> SymbolBuilder<'a> {
@@ -99,6 +100,7 @@ impl<'a> SymbolBuilder<'a> {
             typ,
             size: 0,
             shndx: 0,
+            value: 0,
         }
     }
     pub fn from_decl(decl: &'a DefinedDecl) -> Self {
@@ -121,6 +123,11 @@ impl<'a> SymbolBuilder<'a> {
         self.shndx = shndx;
         self
     }
+    /// Set the value field, usually an offset from the beginning of the section
+    pub fn value(mut self, value: u64) -> Self {
+        self.value = value;
+        self
+    }
     /// Finalize and create the symbol
     pub fn create(self) -> Symbol {
         use goblin::elf::section_header::SHN_ABS;
@@ -131,7 +138,7 @@ impl<'a> SymbolBuilder<'a> {
         let mut st_shndx = self.shndx;
         let mut st_info = 0;
         let mut st_other = 0;
-        let st_value = 0;
+        let st_value = self.value;
 
         fn scope_stb_flags(s: Scope) -> u8 {
             let flag = match s {
@@ -570,9 +577,22 @@ impl<'a> Elf<'a> {
                 }
             }
             DefinedDecl::Section(_) => {
-                for (_symbol, _symbol_dst_offset) in def.symbols {
-                    // FIXME: implement it
-                    unimplemented!("elf: custom symbols referencing sections");
+                for (symbol, symbol_dst_offset) in def.symbols {
+                    // TODO: can we move the string instead of cloning?
+                    let (idx, offset) = self.new_string(symbol.clone());
+                    debug!(
+                        "idx: {:?} @ {:#x} - new strtab offset: {:#x}",
+                        idx, offset, self.sizeof_strtab
+                    );
+
+                    // TODO: per-symbol type?
+                    let symbol = SymbolBuilder::new(SymbolType::None)
+                        .name_offset(offset)
+                        .section_index(shndx)
+                        .value(*symbol_dst_offset)
+                        .create();
+
+                    self.symbols.insert(idx, symbol);
                 }
             }
         }
