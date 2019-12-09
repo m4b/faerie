@@ -320,3 +320,44 @@ fn extended_symtab_issue_76() {
         }
     }
 }
+
+#[test]
+fn custom_section_symbols() {
+    let name = "custom_section_symbols.o";
+    let mut obj = ArtifactBuilder::new(triple!("x86_64-unknown-unknown-unknown-elf"))
+        .name(name.to_string())
+        .finish();
+
+    let mut symbols = std::collections::BTreeMap::new();
+    for i in 0..0x10000 {
+        let sym = format!("sym{}", i);
+        symbols.insert(sym, i);
+    }
+
+    obj.declare(
+        "test_section",
+        Decl::section(faerie::SectionKind::Data).with_datatype(faerie::DataType::Bytes),
+    )
+    .expect("can declare section");
+    obj.define_with_symbols("test_section", vec![0; 0x10000], symbols.clone())
+        .expect("can define section w/ 0x10000 symbols");
+    let bytes = obj
+        .emit()
+        .expect("can emit elf object file w/ custom section symbols");
+
+    if let goblin::Object::Elf(elf) = goblin::Object::parse(&bytes).expect("can parse elf file") {
+        for sym in elf.syms.iter() {
+            if let Some(addr) = symbols.get(&elf.strtab[sym.st_name]) {
+                assert_eq!(sym.st_value, *addr);
+                assert_eq!(sym.st_type(), goblin::elf::sym::STT_NOTYPE);
+                symbols.remove(&elf.strtab[sym.st_name]);
+            }
+        }
+
+        if !symbols.is_empty() {
+            panic!("{} symbols not present in final binary!", symbols.len());
+        }
+    } else {
+        panic!("Elf file not parsed as elf file");
+    }
+}
