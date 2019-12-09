@@ -89,7 +89,7 @@ struct SymbolBuilder<'a> {
     size: u64,
     typ: SymbolType<'a>,
     shndx: usize,
-    value: u64
+    value: u64,
 }
 
 impl<'a> SymbolBuilder<'a> {
