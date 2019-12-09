@@ -520,10 +520,9 @@ impl<'a> Elf<'a> {
             .align(decl.get_align())
             .section_type(match decl {
                 DefinedDecl::Function(_) => SectionType::Bits,
-                DefinedDecl::Data(d) => Self::section_type_for_data(
-                    d.get_datatype(),
-                    def.data.is_zero_init(),
-                ),
+                DefinedDecl::Data(d) => {
+                    Self::section_type_for_data(d.get_datatype(), def.data.is_zero_init())
+                }
                 DefinedDecl::Section(d) => {
                     // TODO: this behavior should be deprecated, but we need to warn users!
                     if name == ".debug_str" || name == ".debug_line_str" {

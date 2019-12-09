@@ -520,7 +520,7 @@ pub struct SectionDecl {
     align: Option<u64>,
     writable: Option<bool>,
     executable: Option<bool>,
-    loaded: bool
+    loaded: bool,
 }
 
 impl SectionDecl {
@@ -535,7 +535,7 @@ impl SectionDecl {
             align: None,
             writable: None,
             executable: None,
-            loaded: false
+            loaded: false,
         }
     }
 
