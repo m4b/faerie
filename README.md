@@ -6,7 +6,7 @@ Emit some object files, at your leisure:
 let name = "test.o";
 let file = File::create(Path::new(name))?;
 let mut obj = ArtifactBuilder::new(triple!("x86_64-unknown-unknown-unknown-elf"))
-    .name(name)
+    .name(name.to_owned())
     .finish();
 
 // first we declare our symbolic references;
@@ -16,9 +16,9 @@ obj.declarations(
         ("deadbeef", Decl::function().into()),
         ("main",     Decl::function().global().into()),
         ("str.1",    Decl::cstring().into()),
-        ("DEADBEEF", Decl::data_import()),
-        ("printf",   Decl::function_import()),
-    ].into_iter().cloned()
+        ("DEADBEEF", Decl::data_import().into()),
+        ("printf",   Decl::function_import().into()),
+    ].iter().cloned()
 )?;
 
 // we now define our local functions and data
