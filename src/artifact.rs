@@ -1,6 +1,5 @@
 //! An artifact is a platform independent binary object file format abstraction.
 
-use anyhow::{bail, Error};
 use indexmap::IndexMap;
 use string_interner::StringInterner;
 use target_lexicon::{BinaryFormat, Triple};
@@ -83,6 +82,22 @@ pub enum ArtifactError {
     /// A non section declaration got custom symbols during definition.
     #[error("Attempt to add custom symbols {1:?} to non section declaration {0:?}")]
     NonSectionCustomSymbols(DefinedDecl, BTreeMap<String, u64>),
+
+    /// Artifact created with a binary format not supported by Faerie
+    #[error("Unsupported binary format `{0}`")]
+    UnsupportedBinaryFormat(BinaryFormat),
+
+    /// Artifact contained symbols which were declared but not defined
+    #[error("Undefined symbols: {0:?}")]
+    UndefinedSymbols(Vec<String>),
+
+    /// Output of ELF format encountered error from `goblin` crate
+    #[error("Goblin error: {0}")]
+    Goblin(#[from] goblin::error::Error),
+
+    /// Io error writing Artifact
+    #[error("Io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -326,7 +341,7 @@ impl Artifact {
         name: T,
         decl: D,
         definition: Vec<u8>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ArtifactError> {
         self.declare(name.as_ref(), decl)?;
         self.define(name, definition)?;
         Ok(())
@@ -388,7 +403,7 @@ impl Artifact {
     pub fn declarations<T: AsRef<str>, D: Iterator<Item = (T, Decl)>>(
         &mut self,
         declarations: D,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ArtifactError> {
         for (name, decl) in declarations {
             self.declare(name, decl)?;
         }
@@ -460,7 +475,7 @@ impl Artifact {
                 let decl = match stype.decl {
                     Decl::Defined(decl) => decl,
                     Decl::Import(_) => {
-                        Err(ArtifactError::ImportDefined(name.as_ref().to_string()).into())?
+                        return Err(ArtifactError::ImportDefined(name.as_ref().to_string()));
                     }
                 };
 
@@ -504,19 +519,23 @@ impl Artifact {
     }
     /// Declare `import` to be an import with `kind`.
     /// This is just sugar for `declare("name", Decl::FunctionImport)` or `declare("data", Decl::DataImport)`
-    pub fn import<T: AsRef<str>>(&mut self, import: T, kind: ImportKind) -> Result<(), Error> {
+    pub fn import<T: AsRef<str>>(
+        &mut self,
+        import: T,
+        kind: ImportKind,
+    ) -> Result<(), ArtifactError> {
         self.declare(import.as_ref(), Decl::Import(kind))?;
         Ok(())
     }
     /// Link a relocation at `link.at` from `link.from` to `link.to`
     /// **NB**: If either `link.from` or `link.to` is undeclared, then this will return an error.
     /// If `link.from` is an import you previously declared, this will also return an error.
-    pub fn link<'a>(&mut self, link: Link<'a>) -> Result<(), Error> {
+    pub fn link<'a>(&mut self, link: Link<'a>) -> Result<(), ArtifactError> {
         self.link_with(link, Reloc::Auto)
     }
     /// A variant of `link` with a `Reloc` provided. Has all of the same invariants as
     /// `link`.
-    pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: Reloc) -> Result<(), Error> {
+    pub fn link_with<'a>(&mut self, link: Link<'a>, reloc: Reloc) -> Result<(), ArtifactError> {
         let (link_from, link_to) = (
             self.strings.get_or_intern(link.from),
             self.strings.get_or_intern(link.to),
@@ -527,16 +546,16 @@ impl Artifact {
         ) {
             (Some(ref from_type), Some(_)) => {
                 if from_type.decl.is_import() {
-                    bail!(ArtifactError::RelocateImport(link.from.to_string()));
+                    return Err(ArtifactError::RelocateImport(link.from.to_string()));
                 }
                 let link = (link_from, link_to, link.at, reloc);
                 self.links.push(link);
             }
             (None, _) => {
-                bail!(ArtifactError::Undeclared(link.from.to_string()));
+                return Err(ArtifactError::Undeclared(link.from.to_string()));
             }
             (_, None) => {
-                bail!(ArtifactError::Undeclared(link.to.to_string()));
+                return Err(ArtifactError::Undeclared(link.to.to_string()));
             }
         }
         Ok(())
@@ -560,38 +579,37 @@ impl Artifact {
 
     /// Emit a blob of bytes representing the object file in the format specified in the target the
     /// `Artifact` was constructed with.
-    pub fn emit(&self) -> Result<Vec<u8>, Error> {
+    pub fn emit(&self) -> Result<Vec<u8>, ArtifactError> {
         self.emit_as(self.target.binary_format)
     }
 
     /// Emit a blob of bytes representing an object file in the given format.
-    pub fn emit_as(&self, format: BinaryFormat) -> Result<Vec<u8>, Error> {
+    pub fn emit_as(&self, format: BinaryFormat) -> Result<Vec<u8>, ArtifactError> {
         let undef = self.undefined_symbols();
         if undef.is_empty() {
-            match format {
-                BinaryFormat::Elf => elf::to_bytes(self),
-                BinaryFormat::Macho => mach::to_bytes(self),
-                _ => bail!(
-                    "binary format {} is not supported",
-                    self.target.binary_format
-                ),
-            }
+            let bytes = match format {
+                BinaryFormat::Elf => elf::to_bytes(self)?,
+                BinaryFormat::Macho => mach::to_bytes(self)?,
+                _ => {
+                    return Err(ArtifactError::UnsupportedBinaryFormat(
+                        self.target.binary_format.to_owned(),
+                    ))
+                }
+            };
+            Ok(bytes)
         } else {
-            bail!(
-                "the following symbols are declared but not defined: {:?}",
-                undef
-            )
+            return Err(ArtifactError::UndefinedSymbols(undef));
         }
     }
 
     /// Emit and write to disk a blob of bytes representing the object file in the format specified
     /// in the target the `Artifact` was constructed with.
-    pub fn write(&self, sink: File) -> Result<(), Error> {
+    pub fn write(&self, sink: File) -> Result<(), ArtifactError> {
         self.write_as(sink, self.target.binary_format)
     }
 
     /// Emit and write to disk a blob of bytes representing an object file in the given format.
-    pub fn write_as(&self, mut sink: File, format: BinaryFormat) -> Result<(), Error> {
+    pub fn write_as(&self, mut sink: File, format: BinaryFormat) -> Result<(), ArtifactError> {
         let bytes = self.emit_as(format)?;
         sink.write_all(&bytes)?;
         Ok(())

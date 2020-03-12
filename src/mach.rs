@@ -6,7 +6,6 @@ use crate::artifact::{
 use crate::target::make_ctx;
 use crate::{Artifact, Ctx};
 
-use anyhow::Error;
 use indexmap::IndexMap;
 use scroll::ctx::SizeWith;
 use scroll::{IOwrite, Pwrite};
@@ -749,7 +748,7 @@ impl<'a> Mach<'a> {
         header.sizeofcmds = sizeofcmds as u32;
         header
     }
-    pub fn write<T: Write + Seek>(self, file: T) -> Result<(), Error> {
+    pub fn write<T: Write + Seek>(self, file: T) -> Result<(), std::io::Error> {
         let mut file = BufWriter::new(file);
         // FIXME: this is ugly af, need cmdsize to get symtable offset
         // construct symtab command
@@ -1039,7 +1038,7 @@ fn build_relocations(segment: &mut SegmentBuilder, artifact: &Artifact, symtab: 
     }
 }
 
-pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
+pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, std::io::Error> {
     let mach = Mach::new(&artifact);
     let mut buffer = Cursor::new(Vec::new());
     mach.write(&mut buffer)?;
