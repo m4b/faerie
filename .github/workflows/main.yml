@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  rustfmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Install Rust
+      run: |
+        rustup update stable
+        rustup default stable
+        rustup component add rustfmt
+    - name: Cargo fmt
+      run: cargo fmt --all -- --check
+
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: [ubuntu, macOS]
+        rust: [stable, beta, nightly]
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - name: Install Rust
+      shell: bash
+      run: |
+        rustup update ${{ matrix.rust }}
+        rustup default ${{ matrix.rust }}
+    - name: Test
+      run: |
+        cargo test --all
+        cargo run --example prototype -- --deadbeef deadbeef.o
+        cargo run --example prototype -- --link test test.o deadbeef.o
+        ./test
+      continue-on-error: ${{ matrix.rust == 'nightly' }}
