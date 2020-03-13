@@ -18,10 +18,10 @@ scroll = "0.10"
 log = "0.4"
 indexmap = "1"
 string-interner = "0.7.1"
-anyhow = "1.0"
 target-lexicon = "0.10.0"
 thiserror = "1.0"
 
 [dev-dependencies]
+anyhow = "1.0"
 env_logger = "0.7"
 structopt = "0.3"

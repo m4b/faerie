@@ -13,7 +13,6 @@ use crate::{
     target::make_ctx,
     Ctx,
 };
-use anyhow::Error;
 use goblin;
 
 use indexmap::IndexMap;
@@ -1024,7 +1023,7 @@ impl<'a> Elf<'a> {
     }
 }
 
-pub fn to_bytes(artifact: &Artifact) -> Result<Vec<u8>, Error> {
+pub fn to_bytes(artifact: &Artifact) -> goblin::error::Result<Vec<u8>> {
     // TODO: make new fully construct the elf object, e.g., the definitions, imports, and links don't take self
     // this means that a call to new has a fully constructed object ready to marshal into bytes, similar to the mach backend
     let mut elf = Elf::new(&artifact);
