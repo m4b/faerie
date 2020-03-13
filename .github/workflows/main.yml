@@ -42,11 +42,11 @@ jobs:
     - name: Test
       run: |
         cargo test --all
-        cargo run --example prototype -- --deadbeef deadbeef.o
       continue-on-error: ${{ matrix.rust == 'nightly' }}
 
     - name: Link and run an executable (Linux)
       run: |
+        cargo run --example prototype -- --deadbeef deadbeef.o
         cargo run --example prototype -- --link test test.o deadbeef.o
         ./test
       if: ${{ matrix.os == 'linux' }}
@@ -54,6 +54,7 @@ jobs:
 
     - name: Link and run an executable (Mac)
       run: |
+        cargo run --example prototype -- --mach --deadbeef deadbeef.o
         cargo run --example prototype -- --mach --link test test.o deadbeef.o
         ./test
       if: ${{ matrix.os == 'macOS' }}
