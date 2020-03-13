@@ -1,4 +1,4 @@
-# faerie [![Build Status](https://travis-ci.org/m4b/faerie.svg?branch=master)](https://travis-ci.org/m4b/faerie) [![Documentatation](https://docs.rs/faerie/badge.svg)](https://docs.rs/faerie).
+# faerie [![Build Status](https://github.com/m4b/faerie/workflows/CI/badge.svg)](https://github.com/m4b/faerie/actions) [![Documentatation](https://docs.rs/faerie/badge.svg)](https://docs.rs/faerie).
 
 Emit some object files, at your leisure:
 
