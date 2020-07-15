@@ -43,36 +43,37 @@ pub enum Scope {
 
 macro_rules! scope_methods {
     () => {
-    /// Set scope to global
-    pub fn global(self) -> Self {
-        self.with_scope(Scope::Global)
-    }
-    /// Set scope to local
-    pub fn local(self) -> Self {
-        self.with_scope(Scope::Local)
-    }
-    /// Set scope to weak
-    pub fn weak(self) -> Self {
-        self.with_scope(Scope::Weak)
-    }
-    /// Builder for scope
-    pub fn with_scope(mut self, scope: Scope) -> Self {
-        self.scope = scope;
-        self
-    }
-    /// Get scope
-    pub fn get_scope(&self) -> Scope {
-        self.scope
-    }
-    /// Set scope
-    pub fn set_scope(&mut self, scope: Scope) {
-        self.scope = scope;
-    }
-    /// Check if scope is `Scope::Global`. False if set to Local or Weak.
-    pub fn is_global(&self) -> bool {
-        self.scope == Scope::Global
-    }
-}}
+        /// Set scope to global
+        pub fn global(self) -> Self {
+            self.with_scope(Scope::Global)
+        }
+        /// Set scope to local
+        pub fn local(self) -> Self {
+            self.with_scope(Scope::Local)
+        }
+        /// Set scope to weak
+        pub fn weak(self) -> Self {
+            self.with_scope(Scope::Weak)
+        }
+        /// Builder for scope
+        pub fn with_scope(mut self, scope: Scope) -> Self {
+            self.scope = scope;
+            self
+        }
+        /// Get scope
+        pub fn get_scope(&self) -> Scope {
+            self.scope
+        }
+        /// Set scope
+        pub fn set_scope(&mut self, scope: Scope) {
+            self.scope = scope;
+        }
+        /// Check if scope is `Scope::Global`. False if set to Local or Weak.
+        pub fn is_global(&self) -> bool {
+            self.scope == Scope::Global
+        }
+    };
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Linker visibility of a definition
@@ -89,32 +90,33 @@ pub enum Visibility {
 
 macro_rules! visibility_methods {
     () => {
-    /// Set visibility to default
-    pub fn default_visibility(self) -> Self {
-        self.with_visibility(Visibility::Default)
-    }
-    /// Set visibility to protected
-    pub fn protected(self) -> Self {
-        self.with_visibility(Visibility::Protected)
-    }
-    /// Set visibility to hidden
-    pub fn hidden(self) -> Self {
-        self.with_visibility(Visibility::Hidden)
-    }
-    /// Builder for visibility
-    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
-        self.visibility =visibility;
-        self
-    }
-    /// Get visibility
-    pub fn get_visibility(&self) -> Visibility {
-        self.visibility
-    }
-    /// Set visibility
-    pub fn set_visibility(&mut self, visibility: Visibility) {
-        self.visibility = visibility;
-    }
-}}
+        /// Set visibility to default
+        pub fn default_visibility(self) -> Self {
+            self.with_visibility(Visibility::Default)
+        }
+        /// Set visibility to protected
+        pub fn protected(self) -> Self {
+            self.with_visibility(Visibility::Protected)
+        }
+        /// Set visibility to hidden
+        pub fn hidden(self) -> Self {
+            self.with_visibility(Visibility::Hidden)
+        }
+        /// Builder for visibility
+        pub fn with_visibility(mut self, visibility: Visibility) -> Self {
+            self.visibility = visibility;
+            self
+        }
+        /// Get visibility
+        pub fn get_visibility(&self) -> Visibility {
+            self.visibility
+        }
+        /// Set visibility
+        pub fn set_visibility(&mut self, visibility: Visibility) {
+            self.visibility = visibility;
+        }
+    };
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// Type of data declared
@@ -127,42 +129,42 @@ pub enum DataType {
 
 macro_rules! datatype_methods {
     () => {
-    /// Build datatype
-    pub fn with_datatype(mut self, datatype: DataType) -> Self {
-        self.datatype = datatype;
-        self
-    }
-    /// Set datatype
-    pub fn set_datatype(&mut self, datatype: DataType) {
-        self.datatype = datatype;
-    }
-    /// Get datatype
-    pub fn get_datatype(&self) -> DataType {
-        self.datatype
-    }
-    }
+        /// Build datatype
+        pub fn with_datatype(mut self, datatype: DataType) -> Self {
+            self.datatype = datatype;
+            self
+        }
+        /// Set datatype
+        pub fn set_datatype(&mut self, datatype: DataType) {
+            self.datatype = datatype;
+        }
+        /// Get datatype
+        pub fn get_datatype(&self) -> DataType {
+            self.datatype
+        }
+    };
 }
 
 macro_rules! align_methods {
     () => {
-    /// Build alignment. Size is in bytes. If None, a default is chosen
-    /// in the backend.
-    pub fn with_align(mut self, align: Option<u64>) -> Self {
-        self.set_align(align);
-        self
-    }
-    /// Set alignment
-    pub fn set_align(&mut self, align: Option<u64>) {
-        if let Some(align) = align {
-            debug_assert_eq!(align.checked_next_power_of_two(), Some(align));
+        /// Build alignment. Size is in bytes. If None, a default is chosen
+        /// in the backend.
+        pub fn with_align(mut self, align: Option<u64>) -> Self {
+            self.set_align(align);
+            self
         }
-        self.align = align;
-    }
-    /// Get alignment
-    pub fn get_align(&self) -> Option<u64> {
-        self.align
-    }
-    }
+        /// Set alignment
+        pub fn set_align(&mut self, align: Option<u64>) {
+            if let Some(align) = align {
+                debug_assert_eq!(align.checked_next_power_of_two(), Some(align));
+            }
+            self.align = align;
+        }
+        /// Get alignment
+        pub fn get_align(&self) -> Option<u64> {
+            self.align
+        }
+    };
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
