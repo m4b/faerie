@@ -1,7 +1,7 @@
 //! An artifact is a platform independent binary object file format abstraction.
 
 use indexmap::IndexMap;
-use string_interner::{StringInterner, backend::BucketBackend};
+use string_interner::StringInterner;
 use target_lexicon::{BinaryFormat, Triple};
 use thiserror::Error;
 
@@ -197,8 +197,8 @@ pub(crate) struct Definition<'a> {
     pub decl: &'a DefinedDecl,
 }
 
-impl<'a> From<(&'a InternalDefinition, &'a StringInterner<StringID, BucketBackend<StringID>>)> for Definition<'a> {
-    fn from((def, strings): (&'a InternalDefinition, &'a StringInterner<StringID, BucketBackend<StringID>>)) -> Self {
+impl<'a> From<(&'a InternalDefinition, &'a StringInterner<StringID>)> for Definition<'a> {
+    fn from((def, strings): (&'a InternalDefinition, &'a StringInterner<StringID>)) -> Self {
         Definition {
             name: strings
                 .resolve(def.name)
@@ -270,7 +270,7 @@ pub struct Artifact {
     declarations: IndexMap<StringID, InternalDecl>,
     local_definitions: BTreeSet<InternalDefinition>,
     nonlocal_definitions: BTreeSet<InternalDefinition>,
-    strings: StringInterner<StringID, BucketBackend<StringID>>,
+    strings: StringInterner<StringID>,
 }
 
 // api less subject to change

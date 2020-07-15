@@ -12,7 +12,7 @@ use scroll::{IOwrite, Pwrite};
 use std::collections::HashMap;
 use std::io::SeekFrom::*;
 use std::io::{BufWriter, Cursor, Seek, Write};
-use string_interner::{backend::BucketBackend, StringInterner};
+use string_interner::StringInterner;
 use target_lexicon::Architecture;
 
 use goblin::mach::constants::{
@@ -296,7 +296,7 @@ type ArtifactCode<'a> = Vec<Definition<'a>>;
 type ArtifactData<'a> = Vec<Definition<'a>>;
 
 type StrTableIndex = usize;
-type StrTable = StringInterner<StrTableIndex, BucketBackend<StrTableIndex>>;
+type StrTable = StringInterner<StrTableIndex>;
 type Symbols = IndexMap<StrTableIndex, SymbolBuilder>;
 
 /// A mach object symbol table
