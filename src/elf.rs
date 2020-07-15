@@ -21,7 +21,7 @@ use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::io::SeekFrom::*;
 use std::io::{BufWriter, Cursor, Seek, Write};
-use string_interner::StringInterner;
+use string_interner::{StringInterner, backend::BucketBackend};
 use target_lexicon::Architecture;
 
 use goblin::elf::header::{self, Header};
@@ -403,7 +403,7 @@ struct Elf<'a> {
     sections: IndexMap<StringIndex, SectionInfo>,
     offsets: HashMap<StringIndex, Offset>,
     sizeof_strtab: Offset,
-    strings: StringInterner<StringIndex>,
+    strings: StringInterner<StringIndex, BucketBackend<StringIndex>>,
     sizeof_bits: Offset,
     nsections: u32,
     ctx: Ctx,
@@ -434,7 +434,7 @@ impl<'a> Elf<'a> {
     pub fn new(artifact: &'a Artifact) -> Self {
         let ctx = make_ctx(&artifact.target);
         let mut offsets = HashMap::new();
-        let mut strings: StringInterner<usize> = StringInterner::new();
+        let mut strings: StringInterner<usize, BucketBackend<usize>> = StringInterner::new();
         let mut special_symbols = Vec::new();
         let mut sizeof_strtab = 1;
 
@@ -901,7 +901,7 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         file.seek(Start(strtab_offset))?;
         file.iowrite(0u8)?; // for the null value in the strtab;
-        for (_id, string) in self.strings.iter() {
+        for (_id, string) in &self.strings {
             debug!("String: {:?}", string);
             file.write_all(string.as_bytes())?;
             file.iowrite(0u8)?;
