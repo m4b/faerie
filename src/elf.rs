@@ -901,7 +901,7 @@ impl<'a> Elf<'a> {
         /////////////////////////////////////
         file.seek(Start(strtab_offset))?;
         file.iowrite(0u8)?; // for the null value in the strtab;
-        for (_id, string) in self.strings.iter() {
+        for (_id, string) in &self.strings {
             debug!("String: {:?}", string);
             file.write_all(string.as_bytes())?;
             file.iowrite(0u8)?;

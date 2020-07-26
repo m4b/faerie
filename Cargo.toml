@@ -17,7 +17,7 @@ goblin = "0.1"
 scroll = "0.10"
 log = "0.4"
 indexmap = "1"
-string-interner = "0.7.1"
+string-interner = "0.12"
 target-lexicon = "0.10.0"
 thiserror = "1.0"
 
