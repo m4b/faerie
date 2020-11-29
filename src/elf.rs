@@ -44,16 +44,13 @@ impl From<Architecture> for MachineTag {
         use target_lexicon::Architecture::*;
         MachineTag(match architecture {
             X86_64 => EM_X86_64,
-            I386 | I586 | I686 => EM_386,
+            X86_32(_) => EM_386,
             Aarch64(_) => EM_AARCH64,
             Arm(_) => EM_ARM,
-            Mips | Mipsel | Mips64 | Mips64el | Mipsisa32r6 | Mipsisa32r6el | Mipsisa64r6
-            | Mipsisa64r6el => EM_MIPS,
+            Mips32(_) | Mips64(_) => EM_MIPS,
             Powerpc => EM_PPC,
             Powerpc64 | Powerpc64le => EM_PPC64,
-            Riscv32 | Riscv32imac | Riscv32imc | Riscv64 | Riscv32i | Riscv64gc | Riscv64imac => {
-                EM_RISCV
-            }
+            Riscv32(_) | Riscv64(_) => EM_RISCV,
             S390x => EM_S390,
             Sparc => EM_SPARC,
             Sparc64 | Sparcv9 => EM_SPARCV9,
@@ -64,6 +61,7 @@ impl From<Architecture> for MachineTag {
             AmdGcn => panic!("amdgcn does not exist in ELF"),
             Asmjs => panic!("asm.js does not exist in ELF"),
             Wasm32 => panic!("wasm32 does not exist in ELF"),
+            arch => panic!(format!("Unknown architecture: {}", arch)),
         })
     }
 }

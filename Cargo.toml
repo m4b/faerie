@@ -1,6 +1,6 @@
 [package]
 name = "faerie"
-version = "0.15.0"
+version = "0.16.0"
 authors = ["m4b <m4b.github.io@gmail.com>", "Dan Gohman <sunfish@mozilla.com>", "Pat Hickey <pat@moreproductive.org>", "Philip Craig <philipjcraig@gmail.com>", "bjorn3 <bjorn3@users.noreply.github.com>"]
 readme = "README.md"
 keywords = ["elf", "mach-o", "binary", "object", "compiler"]
@@ -13,15 +13,15 @@ include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md", "tests/*"]
 edition = "2018"
 
 [dependencies]
-goblin = "0.1"
+goblin = "0.3"
 scroll = "0.10"
 log = "0.4"
 indexmap = "1"
 string-interner = "0.12"
-target-lexicon = "0.10.0"
+target-lexicon = "0.11"
 thiserror = "1.0"
 
 [dev-dependencies]
 anyhow = "1.0"
-env_logger = "0.7"
+env_logger = "0.8"
 structopt = "0.3"

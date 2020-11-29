@@ -34,14 +34,17 @@ impl From<Architecture> for CpuType {
         use target_lexicon::Architecture::*;
         CpuType(match architecture {
             X86_64 => CPU_TYPE_X86_64,
-            I386 | I586 | I686 => CPU_TYPE_X86,
+            X86_32(_) => CPU_TYPE_X86,
             Aarch64(_) => CPU_TYPE_ARM64,
             Arm(_) => CPU_TYPE_ARM,
             Sparc => CPU_TYPE_SPARC,
             Powerpc => CPU_TYPE_POWERPC,
             Powerpc64 | Powerpc64le => CPU_TYPE_POWERPC64,
             Unknown => 0,
-            _ => panic!("requested architecture does not exist in MachO"),
+            arch => panic!(format!(
+                "requested architecture {} does not exist in MachO",
+                arch
+            )),
         })
     }
 }
