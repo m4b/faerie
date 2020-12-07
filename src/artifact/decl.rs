@@ -216,8 +216,26 @@ impl DefinedDecl {
     pub fn is_writable(&self) -> bool {
         match self {
             DefinedDecl::Data(a) => a.is_writable(),
-            DefinedDecl::Function(_) => false,
+            DefinedDecl::Function(a) => a.is_writable(),
             DefinedDecl::Section(a) => a.is_writable(),
+        }
+    }
+
+    /// Accessor to determine whether contents are executable
+    pub fn is_executable(&self) -> bool {
+        match self {
+            DefinedDecl::Section(a) => a.is_executable(),
+            DefinedDecl::Function(_) => true,
+            DefinedDecl::Data(a) => a.is_executable(),
+        }
+    }
+
+    /// Accessor to determine whether contents will be loaded at runtime
+    pub fn is_loaded(&self) -> bool {
+        match self {
+            DefinedDecl::Section(a) => a.is_loaded(),
+            DefinedDecl::Function(_) => true,
+            DefinedDecl::Data(_) => true,
         }
     }
 
@@ -402,6 +420,7 @@ pub struct FunctionDecl {
     scope: Scope,
     visibility: Visibility,
     align: Option<u64>,
+    writable: Option<bool>,
 }
 
 impl Default for FunctionDecl {
@@ -410,6 +429,7 @@ impl Default for FunctionDecl {
             scope: Scope::Local,
             visibility: Visibility::Default,
             align: None,
+            writable: None,
         }
     }
 }
@@ -418,6 +438,36 @@ impl FunctionDecl {
     scope_methods!();
     visibility_methods!();
     align_methods!();
+
+    /// Setter for mutability
+    pub fn set_writable(&mut self, writable: bool) {
+        self.writable = Some(writable);
+    }
+
+    /// Builder for mutability
+    pub fn with_writable(mut self, writable: bool) -> Self {
+        self.writable = Some(writable);
+        self
+    }
+
+    /// Set mutability to writable
+    pub fn writable(self) -> Self {
+        self.with_writable(true)
+    }
+
+    /// Set mutability to read-only
+    pub fn read_only(self) -> Self {
+        self.with_writable(false)
+    }
+
+    /// Accessor to determine whether contents are writable
+    pub fn is_writable(&self) -> bool {
+        if let Some(writable) = self.writable {
+            return writable;
+        }
+
+        false
+    }
 }
 
 impl Into<Decl> for FunctionDecl {
@@ -432,6 +482,7 @@ pub struct DataDecl {
     scope: Scope,
     visibility: Visibility,
     writable: bool,
+    executable: Option<bool>,
     datatype: DataType,
     align: Option<u64>,
 }
@@ -442,6 +493,7 @@ impl Default for DataDecl {
             scope: Scope::Local,
             visibility: Visibility::Default,
             writable: false,
+            executable: None,
             datatype: DataType::Bytes,
             align: None,
         }
@@ -454,7 +506,7 @@ impl DataDecl {
     datatype_methods!();
     align_methods!();
 
-    /// Builder for writability
+    /// Builder for mutability
     pub fn with_writable(mut self, writable: bool) -> Self {
         self.writable = writable;
         self
@@ -474,6 +526,26 @@ impl DataDecl {
     /// Accessor for mutability
     pub fn is_writable(&self) -> bool {
         self.writable
+    }
+
+    /// Setter for executability
+    pub fn set_executable(&mut self, executable: bool) {
+        self.executable = Some(executable);
+    }
+
+    /// Builder for executability
+    pub fn with_executable(mut self, executable: bool) -> Self {
+        self.executable = Some(executable);
+        self
+    }
+
+    /// Accessor to determine whether contents are executable
+    pub fn is_executable(&self) -> bool {
+        if let Some(executable) = self.executable {
+            return executable;
+        }
+
+        false
     }
 }
 
@@ -502,6 +574,9 @@ pub struct SectionDecl {
     kind: SectionKind,
     datatype: DataType,
     align: Option<u64>,
+    writable: Option<bool>,
+    executable: Option<bool>,
+    loaded: bool,
 }
 
 impl SectionDecl {
@@ -514,6 +589,9 @@ impl SectionDecl {
             kind,
             datatype: DataType::Bytes,
             align: None,
+            writable: None,
+            executable: None,
+            loaded: false,
         }
     }
 
@@ -523,12 +601,76 @@ impl SectionDecl {
         false
     }
 
+    /// Setter for mutability
+    pub fn set_writable(&mut self, writable: bool) {
+        self.writable = Some(writable);
+    }
+
+    /// Builder for mutability
+    pub fn with_writable(mut self, writable: bool) -> Self {
+        self.writable = Some(writable);
+        self
+    }
+
+    /// Set mutability to writable
+    pub fn writable(self) -> Self {
+        self.with_writable(true)
+    }
+
+    /// Set mutability to read-only
+    pub fn read_only(self) -> Self {
+        self.with_writable(false)
+    }
+
     /// Accessor to determine whether contents are writable
     pub fn is_writable(&self) -> bool {
+        if let Some(writable) = self.writable {
+            return writable;
+        }
+
         match self.kind {
             SectionKind::Data => true,
             SectionKind::Debug | SectionKind::Text => false,
         }
+    }
+
+    /// Setter for executability
+    pub fn set_executable(&mut self, executable: bool) {
+        self.executable = Some(executable);
+    }
+
+    /// Builder for executability
+    pub fn with_executable(mut self, executable: bool) -> Self {
+        self.executable = Some(executable);
+        self
+    }
+
+    /// Accessor to determine whether contents are executable
+    pub fn is_executable(&self) -> bool {
+        if let Some(executable) = self.executable {
+            return executable;
+        }
+
+        match self.kind {
+            SectionKind::Text => true,
+            SectionKind::Data | SectionKind::Debug => false,
+        }
+    }
+
+    /// Setter for loadability
+    pub fn set_loaded(&mut self, loaded: bool) {
+        self.loaded = loaded;
+    }
+
+    /// Builder for loadabliity
+    pub fn with_loaded(mut self, loaded: bool) -> Self {
+        self.loaded = loaded;
+        self
+    }
+
+    /// Accessor to determine whether contents are loaded at runtime
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
     }
 
     /// Get the kind for this `SectionDecl`

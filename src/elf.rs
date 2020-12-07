@@ -8,7 +8,7 @@
 use crate::{
     artifact::{
         self, Artifact, Data, DataType, Decl, DefinedDecl, ImportKind, LinkAndDecl, Reloc, Scope,
-        Visibility,
+        SectionKind, Visibility,
     },
     target::make_ctx,
     Ctx,
@@ -518,33 +518,30 @@ impl<'a> Elf<'a> {
             (_, DefinedDecl::Section(_)) => name.to_owned(),
         };
 
-        let section = match decl {
-            DefinedDecl::Function(d) => SectionBuilder::new(def_size as u64)
-                .section_type(SectionType::Bits)
-                .alloc()
-                .writable(false)
-                .exec(true)
-                .align(d.get_align()),
-            DefinedDecl::Data(d) => SectionBuilder::new(def_size as u64)
-                .section_type(Self::section_type_for_data(
-                    d.get_datatype(),
-                    def.data.is_zero_init(),
-                ))
-                .alloc()
-                .writable(d.is_writable())
-                .exec(false)
-                .align(d.get_align()),
-            DefinedDecl::Section(d) => SectionBuilder::new(def_size as u64)
-                .section_type(
+        let mut section = SectionBuilder::new(def_size as u64)
+            .writable(decl.is_writable())
+            .exec(decl.is_executable())
+            .align(decl.get_align())
+            .section_type(match decl {
+                DefinedDecl::Function(_) => SectionType::Bits,
+                DefinedDecl::Data(d) => {
+                    Self::section_type_for_data(d.get_datatype(), def.data.is_zero_init())
+                }
+                DefinedDecl::Section(d) => {
                     // TODO: this behavior should be deprecated, but we need to warn users!
                     if name == ".debug_str" || name == ".debug_line_str" {
                         SectionType::String
+                    } else if d.kind() == SectionKind::Text && d.get_datatype() == DataType::Bytes {
+                        SectionType::Bits
                     } else {
                         Self::section_type_for_data(d.get_datatype(), def.data.is_zero_init())
-                    },
-                )
-                .align(d.get_align()),
-        };
+                    }
+                }
+            });
+
+        if decl.is_loaded() {
+            section = section.alloc();
+        }
 
         let shndx = match def.data {
             Data::Blob(bytes) => self.add_progbits(section_name, section, bytes),
