@@ -61,7 +61,7 @@ impl From<Architecture> for MachineTag {
             AmdGcn => panic!("amdgcn does not exist in ELF"),
             Asmjs => panic!("asm.js does not exist in ELF"),
             Wasm32 => panic!("wasm32 does not exist in ELF"),
-            arch => panic!(format!("Unknown architecture: {}", arch)),
+            arch => panic!("Unknown architecture: {}", arch),
         })
     }
 }

@@ -41,10 +41,7 @@ impl From<Architecture> for CpuType {
             Powerpc => CPU_TYPE_POWERPC,
             Powerpc64 | Powerpc64le => CPU_TYPE_POWERPC64,
             Unknown => 0,
-            arch => panic!(format!(
-                "requested architecture {} does not exist in MachO",
-                arch
-            )),
+            arch => panic!("requested architecture {} does not exist in MachO", arch),
         })
     }
 }
