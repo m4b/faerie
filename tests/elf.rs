@@ -225,7 +225,57 @@ fn decl_attributes() {
                 Ok(())
             },
         ),
+        DeclTestCase::new(
+            "executable_data",
+            Decl::data().with_executable(true),
+            |_sym, sect| {
+                ensure!(sect.is_executable(), "executable");
+                Ok(())
+            },
+        ),
+        DeclTestCase::new(
+            "mutable_function",
+            Decl::function().writable(),
+            |_sym, sect| {
+                ensure!(sect.is_writable(), "writable");
+                Ok(())
+            },
+        ),
     ]);
+}
+
+#[test]
+// Can't test with DeclTestCase, as section declarations don't generate symbols
+fn section_permissions() {
+    let mut obj = Artifact::new(triple!("x86_64-unknown-unknown-unknown-elf"), "a".into());
+    obj.declare(
+        "test",
+        Decl::section(faerie::SectionKind::Text)
+            .with_loaded(true)
+            .with_writable(true)
+            .with_executable(true),
+    )
+    .expect("Can declare section with permissions");
+    obj.define("test", vec![1, 2, 3, 4])
+        .expect("Can define section");
+
+    let bytes = obj.emit().expect("can emit elf file");
+    if let goblin::Object::Elf(elf) = goblin::Object::parse(&bytes).expect("can parse elf file") {
+        let sect = elf
+            .section_headers
+            .iter()
+            .find(|section| &elf.shdr_strtab[section.sh_name] == "test");
+
+        if let Some(section) = sect {
+            assert!(section.is_alloc());
+            assert!(section.is_writable());
+            assert!(section.is_executable());
+        } else {
+            panic!("Could not find test section")
+        }
+    } else {
+        panic!("Elf file not parsed as elf file");
+    }
 }
 
 /* test scaffolding: */
