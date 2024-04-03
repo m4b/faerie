@@ -1,3 +1,5 @@
+#![cfg_attr(rustfmt, rustfmt_skip)]
+
 use faerie::{ArtifactBuilder, ArtifactError, triple, Link, Decl};
 use std::path::Path;
 use std::fs::File;

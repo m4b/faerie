@@ -26,5 +26,6 @@ pub use crate::artifact::{
     Artifact, ArtifactBuilder, ArtifactError, Data, ImportKind, Link, Reloc,
 };
 
-
-pub use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor, triple};
+pub use target_lexicon::{
+    triple, Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor,
+};
